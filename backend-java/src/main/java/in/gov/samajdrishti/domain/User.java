@@ -40,8 +40,37 @@ public class User {
     @Column(name = "phone", length = 20)
     private String phone;
 
+    /**
+     * The district this officer is responsible for.
+     *
+     * <p>Added with the LLD's §16 random-assignment filters, which need a way to prefer an
+     * officer whose jurisdiction actually contains the site. Null means "any district", so
+     * the seeder's existing users keep working.
+     */
+    @Column(name = "district", length = 100)
+    private String district;
+
+    @Column(name = "state", length = 100)
+    private String state;
+
+    /**
+     * Whether the account can still be assigned work.
+     *
+     * <p>Defaults true so every existing row stays usable. A deactivated officer is
+     * excluded from assignment but keeps their inspection history.
+     */
+    @Column(name = "is_active", nullable = false)
+    private boolean active = true;
+
+    /** Whether the officer is currently taking new assignments. */
+    @Column(name = "available", nullable = false)
+    private boolean available = true;
+
     @Column(name = "created_at")
     private Instant createdAt;
+
+    @Column(name = "updated_at")
+    private Instant updatedAt;
 
     public Integer getId() {
         return id;
@@ -99,11 +128,51 @@ public class User {
         this.phone = phone;
     }
 
+    public String getDistrict() {
+        return district;
+    }
+
+    public void setDistrict(String district) {
+        this.district = district;
+    }
+
+    public String getState() {
+        return state;
+    }
+
+    public void setState(String state) {
+        this.state = state;
+    }
+
+    public boolean isActive() {
+        return active;
+    }
+
+    public void setActive(boolean active) {
+        this.active = active;
+    }
+
+    public boolean isAvailable() {
+        return available;
+    }
+
+    public void setAvailable(boolean available) {
+        this.available = available;
+    }
+
     public Instant getCreatedAt() {
         return createdAt;
     }
 
     public void setCreatedAt(Instant createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public Instant getUpdatedAt() {
+        return updatedAt;
+    }
+
+    public void setUpdatedAt(Instant updatedAt) {
+        this.updatedAt = updatedAt;
     }
 }

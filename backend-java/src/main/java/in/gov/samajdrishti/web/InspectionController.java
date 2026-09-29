@@ -13,7 +13,9 @@ import in.gov.samajdrishti.repository.UserRepository;
 import in.gov.samajdrishti.security.AuthPrincipal;
 import in.gov.samajdrishti.service.AiEngineClient;
 import in.gov.samajdrishti.service.AuditService;
+import in.gov.samajdrishti.service.ChecklistService;
 import in.gov.samajdrishti.service.GeoService;
+import in.gov.samajdrishti.service.InspectionService;
 import in.gov.samajdrishti.web.dto.Requests;
 import jakarta.validation.Valid;
 import java.time.Instant;
@@ -38,35 +40,6 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/inspections")
 public class InspectionController {
 
-    private static final List<String> VALID_STATUSES =
-            List.of("pending", "in_progress", "completed", "flagged");
-
-    /** Scheme-specific regulatory checklists, per DoSJE inspection guidelines. */
-    private static final Map<String, List<ChecklistItem>> SCHEME_CHECKLISTS = Map.of(
-            "avyay", List.of(
-                    item("resident_headcount", "Resident Headcount Match: Physical count matches approved quota", 25),
-                    item("dietary_nutrition", "Nutrition Standard: Clean kitchen, weekly approved menu displayed", 15),
-                    item("medical_log", "Medical Attendance: Registered doctor visit verified in logbook", 20),
-                    item("hygiene_bedding", "Living Quarters: Sanitized rooms, clean bedding, hot water", 15),
-                    item("emergency_medicines", "Medicine Stock: First aid kit & essential chronic illness drugs stocked", 15),
-                    item("recreational_counseling", "Recreation & Well-being: TV room, reading materials, counseling logs", 10)),
-            "napddr", List.of(
-                    item("doctor_duty", "Medical Staff: MBBS Doctor / Psychiatrist verified on active duty", 25),
-                    item("detox_ward_safety", "Detox Ward Security: 24/7 nursing and secure patient observation", 20),
-                    item("medicine_register", "Schedule-H Register: Controlled medication entries reconciled without gap", 20),
-                    item("psychosocial_counseling", "Counseling Protocols: Individual and group therapy session records", 15),
-                    item("relapse_tracking", "Post-Discharge Registry: Relapse follow-up documented for alumni", 10),
-                    item("nutrition_hygiene", "Sanitation & Diet: Clean kitchen, balanced food, hygienic washrooms", 10)),
-            "sipda", List.of(
-                    item("barrier_free_ramp", "Accessibility Ramps: CPWD standard 1:12 gradient with dual handrails", 25),
-                    item("accessible_toilets", "Barrier-Free Restrooms: Grab bars, wide doorways, wheel-chair turning radius", 20),
-                    item("assistive_devices", "Assistive Tech Kits: Screen readers, Braille aids, hearing loop functional", 20),
-                    item("trainer_ratio", "Certified Special Educators: Recognized RCI trainer ratio maintained", 15),
-                    item("biometric_attendance", "AEBAS Verification: Biometric logs match live classroom headcount", 15),
-                    item("placement_records", "Vocational Placement: Job link documentation and certificates current", 5)));
-
-    private static final String DEFAULT_SCHEME = "avyay";
-
     private final InspectionRepository inspections;
     private final ProjectRepository projects;
     private final UserRepository users;
@@ -75,6 +48,8 @@ public class InspectionController {
     private final AuditService audit;
     private final AiEngineClient ai;
     private final RealtimeHub hub;
+    private final InspectionService lifecycle;
+    private final ChecklistService checklistService;
 
     public InspectionController(InspectionRepository inspections,
                                 ProjectRepository projects,
@@ -83,7 +58,9 @@ public class InspectionController {
                                 GeoService geo,
                                 AuditService audit,
                                 AiEngineClient ai,
-                                RealtimeHub hub) {
+                                RealtimeHub hub,
+                                InspectionService lifecycle,
+                                ChecklistService checklistService) {
         this.inspections = inspections;
         this.projects = projects;
         this.users = users;
@@ -92,13 +69,8 @@ public class InspectionController {
         this.audit = audit;
         this.ai = ai;
         this.hub = hub;
-    }
-
-    private record ChecklistItem(String id, String title, int weight) {
-    }
-
-    private static ChecklistItem item(String id, String title, int weight) {
-        return new ChecklistItem(id, title, weight);
+        this.lifecycle = lifecycle;
+        this.checklistService = checklistService;
     }
 
     @PostMapping("/assign")
@@ -147,11 +119,20 @@ public class InspectionController {
                 .toList();
     }
 
+    /**
+     * One inspection.
+     *
+     * <p>Ownership-checked: an officer may only read their own, which this route previously
+     * did not enforce.
+     */
     @GetMapping("/{id}")
     @Transactional(readOnly = true)
-    public Map<String, Object> byId(@PathVariable Integer id) {
+    public Map<String, Object> byId(@PathVariable Integer id, @AuthenticationPrincipal AuthPrincipal current) {
+        boolean backOffice = current != null && current.isBackOffice();
         Inspection inspection = inspections.findById(id)
-                .orElseThrow(() -> ApiException.notFound("Inspection not found"));
+                .filter(i -> backOffice || current == null || i.getAssignedTo() == null
+                        || i.getAssignedTo().equals(current.id()))
+                .orElseThrow(() -> ApiException.notFound("Inspection not found or not assigned to you"));
         Project project = projects.findById(inspection.getProjectId()).orElse(null);
         User official = users.findById(inspection.getAssignedTo()).orElse(null);
 
@@ -159,81 +140,60 @@ public class InspectionController {
         row.put("geo_coords", project == null ? null : GeoService.normalise(project.getGeoCoords()));
         row.put("scheme", project == null ? null : project.getDepartment());
         row.put("official_name", official == null ? null : official.getName());
+        row.put("gps_verified", inspection.isGpsVerified());
+        row.put("gps_verdict", inspection.getGpsVerdict());
         return row;
     }
 
     /**
-     * Status transitions.
+     * The LLD's §19 transition endpoints, one per milestone.
      *
-     * <p>Every change is geo-tagged. A report filed far from the registered site is
-     * escalated to {@code flagged} automatically, audited, and broadcast - this is the
-     * mechanism that reduces fake reporting and proxy functioning.
+     * <p>{@code start} requires a passing geofence, so "in progress" always means the
+     * officer was verifiably on site. That check used to be advisory: the status could be set
+     * to {@code in_progress} with no coordinates at all, and the failure was logged rather
+     * than enforced.
+     */
+    @PostMapping("/{id}/accept")
+    public Map<String, Object> accept(@PathVariable Integer id, @AuthenticationPrincipal AuthPrincipal current) {
+        return lifecycle.accept(id, current);
+    }
+
+    @PostMapping("/{id}/start")
+    public Map<String, Object> start(@PathVariable Integer id,
+                                     @RequestBody(required = false) Requests.GeoRequest body,
+                                     @AuthenticationPrincipal AuthPrincipal current) {
+        return lifecycle.start(id, body == null ? null : body.lat(), body == null ? null : body.lng(), current);
+    }
+
+    /**
+     * Ends the field visit and runs the AI analysis pass.
+     *
+     * <p>Distinct from filing the report, which the officer does deliberately afterwards.
+     */
+    @PostMapping("/{id}/complete")
+    public Map<String, Object> complete(@PathVariable Integer id,
+                                        @RequestBody(required = false) Requests.UpdateInspectionStatus body,
+                                        @AuthenticationPrincipal AuthPrincipal current) {
+        return lifecycle.complete(id,
+                body == null ? null : body.notes(),
+                body == null ? null : body.lat(),
+                body == null ? null : body.lng(),
+                current);
+    }
+
+    /**
+     * Status transitions, the legacy route.
+     *
+     * <p>Kept because both shipped clients call it. Now enforced against the §19 state
+     * machine rather than a four-value list, so it cannot bypass the transition rules the
+     * dedicated routes apply.
      */
     @PutMapping("/{id}/status")
-    @Transactional
     public Map<String, Object> updateStatus(@PathVariable Integer id,
                                             @RequestBody Requests.UpdateInspectionStatus body,
                                             @AuthenticationPrincipal AuthPrincipal current) {
-        if (!VALID_STATUSES.contains(body.status())) {
-            throw ApiException.badRequest("status must be one of: " + String.join(", ", VALID_STATUSES));
-        }
-
-        Inspection inspection = inspections.findByIdAndAssignedTo(id, current.id())
-                .orElseThrow(() -> ApiException.notFound("Inspection not found or not assigned to you"));
-        String previousStatus = inspection.getStatus();
-
-        inspection.setStatus(body.status());
-        if (body.notes() != null) {
-            inspection.setNotes(body.notes());
-        }
-        inspection.setCompletedDate(body.completedDate() == null ? LocalDate.now() : body.completedDate());
-        inspections.save(inspection);
-
-        List<String> flags = new ArrayList<>();
-        Map<String, Object> geoVerification = null;
-
-        if (body.lat() != null && body.lng() != null) {
-            Project project = projects.findById(inspection.getProjectId()).orElse(null);
-            GeoPoint observed = GeoPoint.of(body.lat(), body.lng());
-            geoVerification = geo.verify(GeoService.normalise(project == null ? null : project.getGeoCoords()),
-                    observed);
-
-            String verdict = String.valueOf(geoVerification.get("verdict"));
-            if (!"verified".equals(verdict)) {
-                flags.add("suspicious".equals(verdict) ? "possible_proxy_reporting" : "outside_expected_radius");
-                audit.record(current, "geo_verification." + verdict, "inspection", inspection.getId(),
-                        geoVerification);
-
-                if ("suspicious".equals(verdict)) {
-                    inspection.setStatus("flagged");
-                    inspections.save(inspection);
-                    flags.add("auto_flagged");
-                    hub.emit("alert", Map.of(
-                            "severity", "high",
-                            "message", "Inspection #%d auto-flagged: %s"
-                                    .formatted(inspection.getId(), geoVerification.get("explanation")),
-                            "meta", Map.of(
-                                    "inspection_id", inspection.getId(),
-                                    "official", current.name() == null ? "" : current.name())));
-                }
-            }
-        }
-
-        audit.record(current, "inspection.status_changed", "inspection", inspection.getId(),
-                Map.of("from", previousStatus == null ? "" : previousStatus,
-                        "to", inspection.getStatus(),
-                        "geo", geoVerification == null ? "not_provided" : String.valueOf(geoVerification.get("verdict"))));
-
-        hub.emit("inspection:update", Map.of(
-                "inspection", inspection,
-                "status", inspection.getStatus(),
-                "flags", flags));
-
-        Map<String, Object> response = new LinkedHashMap<>();
-        response.put("inspection", inspection);
-        response.put("geo_verification", geoVerification);
-        response.put("flags", flags);
-        return response;
+        return lifecycle.updateStatus(id, body.status(), body.notes(), body.completedDate(),
+                body.lat(), body.lng(), current);
     }
 
     /** Standalone location check; the field app calls this while capturing evidence. */
@@ -264,70 +224,46 @@ public class InspectionController {
         return verification;
     }
 
+    /** How far along an inspection is: evidence, checklist, attendance, anomalies. */
+    @GetMapping("/{id}/progress")
+    @Transactional(readOnly = true)
+    public Map<String, Object> progress(@PathVariable Integer id) {
+        return lifecycle.progress(id);
+    }
+
+    /**
+     * The checklist template plus the officer's answers.
+     *
+     * <p>Now per-item: each entry carries its own status, remarks and verification time,
+     * which the previous {@code {itemId: boolean}} blob could not express.
+     */
     @GetMapping("/{id}/checklist")
     @Transactional(readOnly = true)
     public Map<String, Object> getChecklist(@PathVariable Integer id) {
-        Inspection inspection = inspections.findById(id)
-                .orElseThrow(() -> ApiException.notFound("Inspection not found"));
-        String scheme = schemeFor(inspection);
+        Map<String, Object> body = new LinkedHashMap<>(checklistService.get(id));
+        // The legacy boolean map is still emitted so an older field app keeps rendering.
         InspectionChecklist saved = checklists.findByInspectionId(id).orElse(null);
-
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("scheme", scheme.toUpperCase());
-        body.put("items", templateFor(scheme));
         body.put("saved_checks", saved == null ? Map.of() : saved.getChecks());
-        body.put("compliance_score", saved == null ? null : saved.getComplianceScore());
-        body.put("voice_remarks", saved == null ? null : saved.getVoiceRemarks());
         return body;
     }
 
+    /** The LLD's §8 per-item update. */
+    @PutMapping("/{id}/checklist/{itemId}")
+    public Map<String, Object> updateChecklistItem(@PathVariable Integer id,
+                                                   @PathVariable String itemId,
+                                                   @RequestBody Requests.ChecklistItemUpdate body,
+                                                   @AuthenticationPrincipal AuthPrincipal current) {
+        return checklistService.updateItem(id, itemId, body, current);
+    }
+
     @PostMapping("/{id}/checklist")
-    @Transactional
     public Map<String, Object> saveChecklist(@PathVariable Integer id,
                                              @RequestBody Requests.Checklist body,
                                              @AuthenticationPrincipal AuthPrincipal current) {
-        Inspection inspection = inspections.findById(id)
-                .orElseThrow(() -> ApiException.notFound("Inspection not found"));
-        String scheme = schemeFor(inspection);
-        List<ChecklistItem> template = templateFor(scheme);
-        Map<String, Boolean> checks = body.checks() == null ? Map.of() : body.checks();
-
-        int score = 0;
-        for (ChecklistItem item : template) {
-            if (Boolean.TRUE.equals(checks.get(item.id()))) {
-                score += item.weight();
-            }
-        }
-
-        InspectionChecklist record = checklists.findByInspectionId(id).orElseGet(InspectionChecklist::new);
-        record.setInspectionId(id);
-        record.setScheme(scheme.toUpperCase());
-        record.setChecks(checks);
-        record.setComplianceScore(score);
-        record.setVoiceRemarks(body.voiceRemarks());
-        record.setUpdatedAt(Instant.now());
-        InspectionChecklist saved = checklists.save(record);
-
-        audit.record(current, "checklist.submitted", "inspection", id,
-                Map.of("scheme", scheme,
-                        "compliance_score", String.valueOf(score),
-                        "voice_remarks_present", String.valueOf(body.voiceRemarks() != null)));
-
-        return Map.of("message", "Scheme checklist saved", "record", saved);
+        return checklistService.saveAll(id, body, current);
     }
 
     /* ---------------------------------------------------------------- helpers */
-
-    private String schemeFor(Inspection inspection) {
-        Project project = projects.findById(inspection.getProjectId()).orElse(null);
-        String department = project == null ? null : project.getDepartment();
-        String scheme = (department == null ? DEFAULT_SCHEME : department).toLowerCase();
-        return SCHEME_CHECKLISTS.containsKey(scheme) ? scheme : DEFAULT_SCHEME;
-    }
-
-    private static List<ChecklistItem> templateFor(String scheme) {
-        return SCHEME_CHECKLISTS.getOrDefault(scheme, SCHEME_CHECKLISTS.get(DEFAULT_SCHEME));
-    }
 
     private Map<Integer, Project> projectsById() {
         return projects.findAll().stream()

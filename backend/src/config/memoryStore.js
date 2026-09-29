@@ -252,11 +252,38 @@ const ROUTES = [
         file_path: p[2] || null,
         geo_coords: p[3] != null && p[4] != null ? { lat: Number(p[3]), lng: Number(p[4]) } : null,
         timestamp: p[5] || nowIso(),
+        sha256_hash: p[6] || null,
+        previous_hash: p[7] || null,
+        file_size: p[8] != null ? Number(p[8]) : null,
+        mime_type: p[9] || null,
         verified: false,
+        hash_verified: false,
+        verified_at: null,
+        integrity_status: 'unverified',
         created_at: nowIso(),
       };
       state.evidence.push(row);
       return { rows: [{ ...row }] };
+    },
+  },
+  {
+    // Chain read: every item of one inspection, oldest first, so the links
+    // (previous_hash -> sha256_hash) can be walked in order.
+    name: 'evidence:chain',
+    test: (sql) => sql.startsWith('SELECT * FROM evidence') && sql.includes('ORDER BY id ASC'),
+    run: (p) => ({
+      rows: state.evidence
+        .filter((e) => Number(e.inspection_id) === Number(p[0]))
+        .sort((a, b) => Number(a.id) - Number(b.id))
+        .map((e) => ({ ...e })),
+    }),
+  },
+  {
+    name: 'evidence:find-by-id',
+    test: (sql) => sql.startsWith('SELECT * FROM evidence WHERE id'),
+    run: (p) => {
+      const row = state.evidence.find((e) => Number(e.id) === Number(p[0]));
+      return { rows: row ? [{ ...row }] : [] };
     },
   },
   {
@@ -265,7 +292,10 @@ const ROUTES = [
     run: (p) => {
       const row = state.evidence.find((e) => Number(e.id) === Number(p[0]));
       if (!row) return { rows: [] };
-      row.verified = true;
+      row.verified = p[1] === true;
+      row.hash_verified = p[2] === true;
+      row.integrity_status = p[3] || row.integrity_status || 'unverified';
+      row.verified_at = p[4] || row.verified_at || null;
       return { rows: [{ ...row }] };
     },
   },
@@ -367,17 +397,27 @@ const ROUTES = [
   {
     name: 'attendance:insert',
     test: (sql) => sql.startsWith('INSERT INTO attendance'),
-    run: (p) => {
+    run: (p, sql) => {
+      // The check-in statement hard-codes `check_out` as a literal NULL in its
+      // VALUES list and therefore passes 8 parameters, while the 9-parameter
+      // form binds a real value there. (Previously the latitude shifted into
+      // check_out, which broke duplicate detection and check-out.)
+      const hardCodedNullCheckOut = /VALUES\s*\(\s*\$\d+\s*,\s*\$\d+\s*,\s*\$\d+\s*,\s*NULL\b/i.test(sql);
+      const at = hardCodedNullCheckOut
+        ? { checkOut: null, lat: 3, lng: 4, device: 5, mode: 6, date: 7 }
+        : { checkOut: 3, lat: 4, lng: 5, device: 6, mode: 7, date: 8 };
       const row = {
         id: nextId('attendance'),
         official_id: Number(p[0]),
         project_id: p[1] != null ? Number(p[1]) : null,
         check_in: p[2] || null,
-        check_out: p[3] || null,
-        geo_coords: p[4] != null && p[5] != null ? { lat: Number(p[4]), lng: Number(p[5]) } : null,
-        device: p[6] || null,
-        mode: p[7] || 'gps',
-        date: p[8] || new Date().toISOString().slice(0, 10),
+        check_out: at.checkOut != null ? p[at.checkOut] || null : null,
+        geo_coords: p[at.lat] != null && p[at.lng] != null
+          ? { lat: Number(p[at.lat]), lng: Number(p[at.lng]) }
+          : null,
+        device: p[at.device] || null,
+        mode: p[at.mode] || 'gps',
+        date: p[at.date] || new Date().toISOString().slice(0, 10),
         created_at: nowIso(),
       };
       state.attendance.push(row);
@@ -754,6 +794,54 @@ const DEMO_PROJECTS = [
       },
     }
   ],
+  [
+    'Punarjeevan Nasha Mukti Kendra & Rehab (NAPDDR)',
+    'Integrated Rehabilitation Centre for Addicts with medical detoxification, psychosocial counselling and vocational aftercare under the National Action Plan for Drug Demand Reduction.',
+    'Nashik Road, Nashik, Maharashtra',
+    'NAPDDR',
+    4800000,
+    'active',
+    { lat: 19.9975, lng: 73.7898 },
+    {
+      scheme: 'NAPDDR',
+      sanction_code: 'DoSJE/NAPDDR/MH/2023-052',
+      sanctioned_capacity: 40,
+      verified_headcount: 37,
+      aebas_punch_count: 39,
+      discrepancy_delta: 2,
+      head: {
+        name: 'Dr. Prakash Deshmukh',
+        designation: 'Center Head & Chief Counsellor',
+        phone: '+91 98230 44781',
+        email: 'head@punarjeevan-rehab.org',
+        since: '2023-01-16',
+      },
+    }
+  ],
+  [
+    'Saksham Divyangjan Skill Academy (SIPDA)',
+    'Vidarbha skilling hub for persons with disabilities offering certified trades, barrier-free assistive-technology labs and placement support under SIPDA.',
+    'MIHAN, Nagpur, Maharashtra',
+    'SIPDA',
+    6400000,
+    'active',
+    { lat: 21.1458, lng: 79.0882 },
+    {
+      scheme: 'SIPDA',
+      sanction_code: 'DoSJE/SIPDA/MH/2022-036',
+      sanctioned_capacity: 70,
+      verified_headcount: 64,
+      aebas_punch_count: 66,
+      discrepancy_delta: 2,
+      head: {
+        name: 'Mrs. Ashwini Kulkarni',
+        designation: 'Principal & Center Head',
+        phone: '+91 97650 22318',
+        email: 'principal@saksham-academy.org',
+        since: '2022-09-12',
+      },
+    }
+  ],
 ];
 
 const seedUsers = () => {
@@ -1055,6 +1143,20 @@ const seedMonitoring = () => {
       detected_headcount: 36,
       aebas_punch_count: 38,
       anomaly_note: 'Normal: day-care activities running; minor headcount variance (36 physical vs 38 punches)',
+    }],
+    ['Punarjeevan Detox Ward CCTV', 9, 'Ground Floor Detox Ward, Nashik', 'simulated', null, {
+      tamper_flag: 'normal',
+      occlusion_pct: 0,
+      detected_headcount: 37,
+      aebas_punch_count: 39,
+      anomaly_note: 'Normal: morning ward round in progress; minor punch variance (37 physical vs 39 punches)',
+    }],
+    ['Saksham Barrier-Free Skill Hall CCTV', 10, 'Ground Floor Training Hall, MIHAN Nagpur', 'simulated', null, {
+      tamper_flag: 'normal',
+      occlusion_pct: 0,
+      detected_headcount: 30,
+      aebas_punch_count: 30,
+      anomaly_note: 'Normal: trainer and 30 trainees present with assistive equipment',
     }],
   ];
 

@@ -6,6 +6,7 @@ import {
 import {
   Visibility as VisibilityIcon,
   VerifiedUser as VerifiedIcon,
+  Fingerprint as FingerprintIcon,
   Refresh as RefreshIcon,
 } from '@mui/icons-material';
 import { adminAPI } from '../services/api';
@@ -22,10 +23,23 @@ const formatGeo = (coords) => {
 
 const formatDate = (value) => (value ? new Date(value).toLocaleString('en-IN') : '-');
 
+const INTEGRITY = {
+  verified: { label: 'INTEGRITY OK', color: 'success' },
+  tampered: { label: 'TAMPERED', color: 'error' },
+  missing_file: { label: 'FILE MISSING', color: 'warning' },
+  unverified: { label: 'NOT CHECKED', color: 'default' },
+  hashed: { label: 'HASHED', color: 'info' },
+};
+
+const shortHash = (hash) => (hash ? `${hash.slice(0, 8)}…${hash.slice(-6)}` : '—');
+
 const Evidence = () => {
   const [evidence, setEvidence] = useState([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  // Live integrity verdicts, keyed by evidence id (filled on demand).
+  const [verdicts, setVerdicts] = useState({});
+  const [busy, setBusy] = useState(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -42,23 +56,78 @@ const Evidence = () => {
     load();
   }, [load]);
 
-  const verify = async (id) => {
+  /** Re-hashes the stored file on the server (read-only, changes nothing). */
+  const recheck = async (id) => {
+    setBusy(id);
     try {
-      await adminAPI.verifyEvidence(id);
-      load();
+      const res = await adminAPI.checkEvidenceIntegrity(id);
+      setVerdicts((current) => ({ ...current, [id]: res.data.integrity }));
     } catch (err) {
-      setError(err.response?.data?.message || err.message || 'Failed to verify evidence');
+      setError(err.response?.data?.message || err.message || 'Integrity check failed');
+    } finally {
+      setBusy(null);
     }
   };
 
+  const recheckAll = async () => {
+    const hashed = evidence.filter((e) => e.sha256_hash);
+    if (!hashed.length) return;
+    setBusy('all');
+    try {
+      const results = await Promise.all(
+        hashed.map((e) => adminAPI.checkEvidenceIntegrity(e.id).catch(() => null))
+      );
+      const next = {};
+      results.forEach((res, idx) => {
+        if (res) next[hashed[idx].id] = res.data.integrity;
+      });
+      setVerdicts(next);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /** Back-office sign-off: the server re-hashes and refuses tampered files. */
+  const verify = async (id) => {
+    setBusy(id);
+    try {
+      const res = await adminAPI.verifyEvidence(id);
+      setVerdicts((current) => ({ ...current, [id]: res.data.integrity }));
+      if (res.data.integrity?.status === 'tampered') {
+        setError(`Evidence #${id} FAILED the integrity check and was not verified.`);
+      }
+      load();
+    } catch (err) {
+      setError(err.response?.data?.message || err.message || 'Failed to verify evidence');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const statusOf = (item) => verdicts[item.id]?.status || item.integrity_status || (item.sha256_hash ? 'hashed' : 'unverified');
   const pending = evidence.filter((e) => !e.verified).length;
+  const tampered = evidence.filter((e) => statusOf(e) === 'tampered').length;
+  const intact = evidence.filter((e) => statusOf(e) === 'verified').length;
+  const unhashed = evidence.filter((e) => !e.sha256_hash).length;
 
   return (
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h4">Evidence Records</Typography>
-        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-          <Chip size="small" label={`${pending} pending verification`} color={pending ? 'warning' : 'success'} />
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+          <Chip size="small" label={`${intact} integrity OK`} color={intact ? 'success' : 'default'} variant="outlined" />
+          <Chip size="small" label={`${tampered} tampered`} color={tampered ? 'error' : 'default'} variant="outlined" />
+          <Chip size="small" label={`${unhashed} pre-chain`} variant="outlined" />
+          <Chip size="small" label={`${pending} pending sign-off`} color={pending ? 'warning' : 'success'} />
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<FingerprintIcon />}
+            onClick={recheckAll}
+            disabled={busy === 'all'}
+          >
+            {busy === 'all' ? 'Re-hashing…' : 'Re-check integrity'}
+          </Button>
           <Button size="small" variant="outlined" startIcon={<RefreshIcon />} onClick={load} disabled={loading}>
             Refresh
           </Button>
@@ -76,7 +145,9 @@ const Evidence = () => {
               <TableCell>Type</TableCell>
               <TableCell>Geo-tag</TableCell>
               <TableCell>Captured</TableCell>
-              <TableCell>Verified</TableCell>
+              <TableCell>SHA-256</TableCell>
+              <TableCell>Integrity</TableCell>
+              <TableCell>Sign-off</TableCell>
               <TableCell align="right">Actions</TableCell>
             </TableRow>
           </TableHead>
@@ -89,7 +160,27 @@ const Evidence = () => {
                 <TableCell sx={{ fontFamily: 'monospace', fontSize: 12 }}>{formatGeo(e.geo_coords)}</TableCell>
                 <TableCell>{formatDate(e.timestamp || e.created_at)}</TableCell>
                 <TableCell>
-                  <Chip label={e.verified ? 'Verified' : 'Pending'} color={e.verified ? 'success' : 'warning'} size="small" />
+                  <Tooltip title={e.sha256_hash || 'No hash recorded (uploaded before the chain existed)'}>
+                    <span style={{ fontFamily: 'monospace', fontSize: 11.5, color: e.sha256_hash ? '#334155' : '#94a3b8' }}>
+                      {shortHash(e.sha256_hash)}
+                    </span>
+                  </Tooltip>
+                </TableCell>
+                <TableCell>
+                  <Tooltip title={verdicts[e.id]?.explanation || 'Hash taken when the officer uploaded this file'}>
+                    <span>
+                      <Chip
+                        label={INTEGRITY[statusOf(e)]?.label || String(statusOf(e))}
+                        color={INTEGRITY[statusOf(e)]?.color || 'default'}
+                        size="small"
+                        variant={statusOf(e) === 'tampered' ? 'filled' : 'outlined'}
+                        sx={{ fontWeight: 700, fontSize: 10.5 }}
+                      />
+                    </span>
+                  </Tooltip>
+                </TableCell>
+                <TableCell>
+                  <Chip label={e.verified ? 'Signed off' : 'Pending'} color={e.verified ? 'success' : 'warning'} size="small" />
                 </TableCell>
                 <TableCell align="right">
                   <Tooltip title={e.file_path ? 'Open file' : 'No file attached'}>
@@ -103,9 +194,16 @@ const Evidence = () => {
                       </IconButton>
                     </span>
                   </Tooltip>
-                  <Tooltip title={e.verified ? 'Already verified' : 'Mark as verified'}>
+                  <Tooltip title="Re-hash the stored file on the server">
                     <span>
-                      <IconButton color="success" disabled={e.verified} onClick={() => verify(e.id)}>
+                      <IconButton color="info" disabled={!e.sha256_hash || busy === e.id} onClick={() => recheck(e.id)}>
+                        <FingerprintIcon />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                  <Tooltip title={e.verified ? 'Already signed off' : 'Verify integrity and sign off'}>
+                    <span>
+                      <IconButton color="success" disabled={e.verified || busy === e.id} onClick={() => verify(e.id)}>
                         <VerifiedIcon />
                       </IconButton>
                     </span>
@@ -115,7 +213,7 @@ const Evidence = () => {
             ))}
             {!evidence.length && !loading && (
               <TableRow>
-                <TableCell colSpan={7}>No evidence uploaded yet.</TableCell>
+                <TableCell colSpan={9}>No evidence uploaded yet.</TableCell>
               </TableRow>
             )}
           </TableBody>

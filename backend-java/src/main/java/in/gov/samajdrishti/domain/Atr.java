@@ -33,6 +33,20 @@ public class Atr {
     @Column(name = "inspection_id")
     private Integer inspectionId;
 
+    /**
+     * The anomaly that triggered this ATR. An ATR with no anomaly behind it is an
+     * administrative note, so this stays nullable.
+     */
+    @Column(name = "anomaly_id")
+    private Integer anomalyId;
+
+    /** The user accountable for closing the action. */
+    @Column(name = "assigned_to")
+    private Integer assignedTo;
+
+    @Column(name = "assigned_to_name", length = 120)
+    private String assignedToName;
+
     @Column(name = "scheme", length = 40)
     private String scheme;
 
@@ -60,6 +74,20 @@ public class Atr {
 
     @Column(name = "official_name", length = 120)
     private String officialName;
+
+    /**
+     * Whether closure has been independently checked.
+     * {@code pending}, {@code verified} or {@code rejected} - a closed ATR whose corrective
+     * evidence was never verified is not the same as one that was.
+     */
+    @Column(name = "verification_status", length = 20)
+    private String verificationStatus = "pending";
+
+    @Column(name = "remarks", columnDefinition = "text")
+    private String remarks;
+
+    @Column(name = "closed_at")
+    private Instant closedAt;
 
     @Column(name = "created_at")
     private Instant createdAt;
@@ -97,6 +125,30 @@ public class Atr {
 
     public void setInspectionId(Integer inspectionId) {
         this.inspectionId = inspectionId;
+    }
+
+    public Integer getAnomalyId() {
+        return anomalyId;
+    }
+
+    public void setAnomalyId(Integer anomalyId) {
+        this.anomalyId = anomalyId;
+    }
+
+    public Integer getAssignedTo() {
+        return assignedTo;
+    }
+
+    public void setAssignedTo(Integer assignedTo) {
+        this.assignedTo = assignedTo;
+    }
+
+    public String getAssignedToName() {
+        return assignedToName;
+    }
+
+    public void setAssignedToName(String assignedToName) {
+        this.assignedToName = assignedToName;
     }
 
     public String getScheme() {
@@ -169,6 +221,30 @@ public class Atr {
 
     public void setOfficialName(String officialName) {
         this.officialName = officialName;
+    }
+
+    public String getVerificationStatus() {
+        return verificationStatus;
+    }
+
+    public void setVerificationStatus(String verificationStatus) {
+        this.verificationStatus = verificationStatus;
+    }
+
+    public String getRemarks() {
+        return remarks;
+    }
+
+    public void setRemarks(String remarks) {
+        this.remarks = remarks;
+    }
+
+    public Instant getClosedAt() {
+        return closedAt;
+    }
+
+    public void setClosedAt(Instant closedAt) {
+        this.closedAt = closedAt;
     }
 
     public Instant getCreatedAt() {

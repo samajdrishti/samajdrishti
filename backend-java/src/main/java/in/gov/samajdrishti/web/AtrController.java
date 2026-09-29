@@ -1,115 +1,104 @@
 package in.gov.samajdrishti.web;
 
-import in.gov.samajdrishti.domain.Atr;
-import in.gov.samajdrishti.repository.AtrRepository;
-import in.gov.samajdrishti.security.AuthPrincipal;
-import in.gov.samajdrishti.service.AuditService;
-import in.gov.samajdrishti.web.dto.Requests;
-import java.time.Instant;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import in.gov.samajdrishti.domain.Atr;
+import in.gov.samajdrishti.security.AuthPrincipal;
+import in.gov.samajdrishti.service.AtrService;
+import in.gov.samajdrishti.web.dto.Requests;
+
 /**
- * Action Taken Report (ATR) adjudication.
+ * Action Taken Reports, LLD §12.
  *
- * <p>Implements the DoSJE compliance workflow: monitor -> record deficiency -> issue ATR
- * deadline -> NGO responds with proof -> PMU adjudication -> escalate or close.
+ * <p>Thin HTTP layer over {@link AtrService}; the workflow rules live there. The routes that
+ * were missing before - {@code POST /api/atr}, {@code PUT /api/atr/{id}} and
+ * {@code POST /api/atr/{id}/close} - are the reason this workflow was not demoable: an ATR
+ * could be read, answered and adjudicated but never raised.
  */
 @RestController
 @RequestMapping("/api/atr")
 public class AtrController {
 
-    private static final Map<String, String> VERDICTS = Map.of(
-            "approve", "approved_closed",
-            "escalate", "escalated",
-            "reject", "rejected_reinspection");
+    private final AtrService atrs;
 
-    private final AtrRepository atrs;
-    private final AuditService audit;
-
-    public AtrController(AtrRepository atrs, AuditService audit) {
+    public AtrController(AtrService atrs) {
         this.atrs = atrs;
-        this.audit = audit;
     }
 
     @GetMapping
     @Transactional(readOnly = true)
-    public List<Atr> list() {
-        return atrs.findAllByOrderByIdDesc();
+    public List<Atr> list(@org.springframework.web.bind.annotation.RequestParam(required = false) String status,
+                          @org.springframework.web.bind.annotation.RequestParam(required = false) Integer projectId,
+                          @org.springframework.web.bind.annotation.RequestParam(required = false) Integer assignedTo) {
+        return atrs.list(status, projectId, assignedTo);
     }
 
     @GetMapping("/{id}")
     @Transactional(readOnly = true)
     public Atr byId(@PathVariable Integer id) {
-        return atrs.findById(id)
-                .orElseThrow(() -> ApiException.notFound("Action Taken Report not found"));
+        return atrs.byId(id);
+    }
+
+    /** Raises an action against an inspection, an AI finding or a project. */
+    @PostMapping
+    @PreAuthorize("hasAnyRole('ADMIN','SUPERVISOR')")
+    public Map<String, Object> create(@RequestBody Requests.CreateAtr body,
+                                      @AuthenticationPrincipal AuthPrincipal current) {
+        return atrs.create(body, current);
+    }
+
+    @PutMapping("/{id}")
+    @PreAuthorize("hasAnyRole('ADMIN','SUPERVISOR')")
+    public Map<String, Object> update(@PathVariable Integer id,
+                                      @RequestBody(required = false) Requests.UpdateAtr body,
+                                      @AuthenticationPrincipal AuthPrincipal current) {
+        return atrs.update(id, body == null ? new Requests.UpdateAtr(null, null, null, null, null) : body, current);
+    }
+
+    /**
+     * Closes an action.
+     *
+     * <p>Verification is a separate field from status on purpose: an action can be satisfied
+     * and still be rejected on inspection, and conflating the two hides the case that matters.
+     */
+    @PostMapping("/{id}/close")
+    @PreAuthorize("hasAnyRole('ADMIN','SUPERVISOR')")
+    public Map<String, Object> close(@PathVariable Integer id,
+                                     @RequestBody(required = false) Requests.CloseAtr body,
+                                     @AuthenticationPrincipal AuthPrincipal current) {
+        return atrs.close(id, body, current);
     }
 
     @PostMapping("/{id}/respond")
-    @Transactional
     public Map<String, Object> respond(@PathVariable Integer id,
                                        @RequestBody(required = false) Requests.NgoReply body,
                                        @AuthenticationPrincipal AuthPrincipal current) {
-        Atr item = atrs.findById(id)
-                .orElseThrow(() -> ApiException.notFound("ATR record not found"));
-
-        if (body != null) {
-            if (body.ngoReply() != null && !body.ngoReply().isBlank()) {
-                item.setNgoReply(body.ngoReply());
-            }
-            if (body.correctiveEvidenceUrl() != null && !body.correctiveEvidenceUrl().isBlank()) {
-                item.setCorrectiveEvidenceUrl(body.correctiveEvidenceUrl());
-            }
-        }
-        item.setStatus("under_review");
-        item.setUpdatedAt(Instant.now());
-        Atr saved = atrs.save(item);
-
-        audit.record(current, "atr.ngo_reply_submitted", "atr", saved.getId(),
-                Map.of("project_id", String.valueOf(saved.getProjectId()),
-                        "status", saved.getStatus()));
-
-        return Map.of(
-                "message", "Corrective action taken report submitted successfully",
-                "atr", saved);
+        return atrs.respond(id,
+                body == null ? null : body.ngoReply(),
+                body == null ? null : body.correctiveEvidenceUrl(),
+                current);
     }
 
     @PostMapping("/{id}/adjudicate")
     @PreAuthorize("hasAnyRole('ADMIN','SUPERVISOR')")
-    @Transactional
     public Map<String, Object> adjudicate(@PathVariable Integer id,
                                           @RequestBody(required = false) Requests.Adjudication body,
                                           @AuthenticationPrincipal AuthPrincipal current) {
-        Atr item = atrs.findById(id)
-                .orElseThrow(() -> ApiException.notFound("ATR record not found"));
-
-        String action = body == null ? null : body.action();
-        String verdict = action == null ? null : VERDICTS.get(action);
-        if (verdict != null) {
-            item.setStatus(verdict);
-        }
-        if (body != null && body.pmuAdjudication() != null && !body.pmuAdjudication().isBlank()) {
-            item.setPmuAdjudication(body.pmuAdjudication());
-        }
-        item.setOfficialName(current.name());
-        item.setUpdatedAt(Instant.now());
-        Atr saved = atrs.save(item);
-
-        Map<String, Object> meta = new LinkedHashMap<>();
-        meta.put("action", action == null ? "" : action);
-        meta.put("verdict", saved.getStatus() == null ? "" : saved.getStatus());
-        audit.record(current, "atr.adjudicated." + (action == null ? "none" : action), "atr", saved.getId(), meta);
-
-        return Map.of("message", "ATR adjudicated: " + saved.getStatus(), "atr", saved);
+        return atrs.adjudicate(id,
+                body == null ? null : body.action(),
+                body == null ? null : body.pmuAdjudication(),
+                current);
     }
 }

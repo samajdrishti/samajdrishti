@@ -56,13 +56,26 @@ Client URL: `io(BACKEND_ORIGIN, { auth: { token } })`.
 `verdict` is one of `verified` (within radius), `mismatch` (outside radius, moderate) or
 `suspicious` (far outside radius — possible proxy/fake reporting).
 
-## Evidence
+## Evidence (tamper-evident)
 
 | Method | Endpoint | Notes |
 |---|---|---|
-| POST | `/evidence` | `multipart/form-data`: `file`, `inspection_id`, `type`, `lat`, `lng`, `timestamp` |
+| POST | `/evidence` | `multipart/form-data`: `file`, `inspection_id`, `type`, `lat`, `lng`, `timestamp`. The uploaded file is hashed (SHA-256) and linked to the previous item of the same inspection. Responds `{ ...evidence, integrity: { status: "hashed", sha256, previous_hash, chain_length } }` |
 | GET | `/evidence?inspection_id=` | list |
-| PUT | `/evidence/:id/verify` | back office -> `{ ...evidence, verified: true }` |
+| GET | `/evidence/:id/integrity` | read-only verdict: re-hashes the stored file and walks the chain. Returns `{ ...evidence, integrity: { status, file_match, chain_ok, expected_hash, actual_hash, chain_length, explanation, checked_at } }` |
+| PUT | `/evidence/:id/verify` | back office. **Re-hashes instead of flipping a flag**: `verified` is true only when the file still matches the upload hash *and* the chain links are intact. A mismatch is stored as `tampered`, written to the audit trail (`evidence.integrity_failed`) and broadcast as a Socket.IO `alert`. Returns `{ ...evidence, integrity }` |
+
+`integrity.status` is one of:
+
+| status | meaning |
+|---|---|
+| `verified` | file hash matches the upload hash and every chain link is intact |
+| `tampered` | the stored file differs from the hash taken at upload (or a chain link is broken) |
+| `missing_file` | the row has a hash but the file can no longer be read (moved/deleted) |
+| `unverified` | legacy/seeded row with no hash recorded — it predates the chain |
+
+Proof script: `node scripts/integrity-check.mjs` uploads evidence, verifies it,
+alters the file on disk, shows the tamper detection and repairs it again.
 
 ## Attendance (NEW)
 

@@ -33,15 +33,44 @@ public class NotificationService {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public Notification create(Integer userId, String message, String type) {
+        return create(userId, null, message, type, null, null);
+    }
+
+    /**
+     * Creates a notification that can be acted on.
+     *
+     * <p>{@code referenceType} and {@code referenceId} are what let the field app deep-link:
+     * without them an officer told "New action required" has to go and find which ATR it was.
+     * Nulls are dropped from the socket payload rather than sent, because
+     * {@code Map.of} rejects nulls and a missing title is normal.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public Notification create(Integer userId, String title, String message, String type,
+                                String referenceType, Integer referenceId) {
         try {
             Notification notification = new Notification();
             notification.setUserId(userId);
+            notification.setTitle(title);
             notification.setMessage(message);
             notification.setType(type == null ? "info" : type);
+            notification.setReferenceType(referenceType);
+            notification.setReferenceId(referenceId);
             Notification saved = notifications.save(notification);
-            hub.emitToUser(userId, "notification", Map.of(
-                    "message", message,
-                    "type", saved.getType()));
+
+            Map<String, Object> payload = new java.util.LinkedHashMap<>();
+            payload.put("id", saved.getId());
+            payload.put("message", message);
+            payload.put("type", saved.getType());
+            if (title != null) {
+                payload.put("title", title);
+            }
+            if (referenceType != null) {
+                payload.put("reference_type", referenceType);
+            }
+            if (referenceId != null) {
+                payload.put("reference_id", referenceId);
+            }
+            hub.emitToUser(userId, "notification", payload);
             return saved;
         } catch (RuntimeException e) {
             log.error("Notification error: {}", e.getMessage());

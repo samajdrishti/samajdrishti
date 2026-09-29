@@ -115,6 +115,8 @@ export const adminAPI = {
   getInspectionChecklist: (id) => api.get(`/inspections/${id}/checklist`),
   getEvidence: (inspectionId) =>
     api.get(inspectionId ? `/evidence?inspection_id=${inspectionId}` : '/evidence'),
+  /** Re-hash a stored artefact and return the integrity verdict (no state change). */
+  checkEvidenceIntegrity: (id) => api.get(`/evidence/${id}/integrity`),
   verifyEvidence: (id) => api.put(`/evidence/${id}/verify`),
   getNotifications: () => api.get('/notifications'),
 };

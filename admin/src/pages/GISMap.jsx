@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Box, Typography, Paper, Grid, Chip, Button, Alert, Stack, Divider, Tooltip,
-  CircularProgress,
+  CircularProgress, Snackbar,
 } from '@mui/material';
 import {
   LocationOn as LocationIcon,
@@ -14,7 +14,7 @@ import {
   Person as PersonIcon,
   Public as PublicIcon,
 } from '@mui/icons-material';
-import { gisAPI, monitoringAPI } from '../services/api';
+import { gisAPI, monitoringAPI, vcAPI } from '../services/api';
 import { useNavigate } from 'react-router-dom';
 
 const SCHEME_BADGES = {
@@ -31,6 +31,62 @@ const centerColor = (center) =>
 
 const statusChipColor = (status) =>
   status === 'flagged' ? 'error' : status === 'completed' ? 'success' : 'primary';
+
+/* Styling for the pin hover card (used inside a Google InfoWindow and a
+   Leaflet tooltip, so it lives in its own class rather than MUI sx). */
+const PIN_CARD_CSS = `
+.sd-pin-card { min-width: 236px; max-width: 268px; font-family: Roboto, 'Segoe UI', sans-serif; color: #0f172a; background: #fff; border-radius: 10px; border: 1px solid #e2e8f0; box-shadow: 0 6px 24px rgba(15, 23, 42, 0.18); padding: 10px 12px; }
+.sd-pin-card .sd-scheme { display: inline-block; font-size: 10px; font-weight: 800; letter-spacing: 0.4px; padding: 2px 8px; border-radius: 999px; }
+.sd-pin-card .sd-name { font-size: 13px; font-weight: 700; line-height: 1.3; margin: 6px 0 2px; }
+.sd-pin-card .sd-loc { font-size: 11px; color: #64748b; }
+.sd-pin-card .sd-headbox { background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
+.sd-pin-card .sd-headlabel { font-size: 9.5px; font-weight: 800; color: #0369a1; letter-spacing: 0.6px; text-transform: uppercase; }
+.sd-pin-card .sd-headname { font-size: 12.5px; font-weight: 700; margin-top: 2px; }
+.sd-pin-card .sd-headdesig { font-size: 11px; color: #475569; }
+.sd-pin-card .sd-actions { display: flex; gap: 6px; }
+.sd-pin-card .sd-btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 4px; font-size: 11.5px; font-weight: 700; padding: 6px 8px; border-radius: 8px; cursor: pointer; text-decoration: none; border: 1px solid transparent; font-family: inherit; }
+.sd-pin-card .sd-call { background: #ecfdf5; border-color: #a7f3d0; color: #047857; }
+.sd-pin-card .sd-call:hover { background: #d1fae5; }
+.sd-pin-card .sd-vc { background: #eef2ff; border-color: #c7d2fe; color: #4338ca; }
+.sd-pin-card .sd-vc:hover { background: #e0e7ff; }
+.sd-pin-card .sd-vc[disabled] { opacity: 0.65; cursor: wait; }
+.sd-pin-card .sd-hint { font-size: 10px; color: #94a3b8; margin-top: 6px; }
+.leaflet-tooltip.sd-pin-tip { background: transparent; border: none; box-shadow: none; padding: 0; white-space: normal; }
+.leaflet-tooltip.sd-pin-tip::before { display: none; }
+`;
+
+/** Builds the hover card shown above a center pin: department, current head,
+ *  a tap-to-call link and a live video-call button. */
+const buildPinCard = (center, onVideoCall) => {
+  const scheme = SCHEME_BADGES[center.scheme] || {
+    label: center.scheme || 'Department',
+    color: '#475569',
+    bg: '#f1f5f9',
+  };
+  const head = center.head || {};
+  const el = document.createElement('div');
+  el.className = 'sd-pin-card';
+  el.innerHTML = `
+    <span class="sd-scheme" style="background:${scheme.bg};color:${scheme.color};">${scheme.label}</span>
+    <div class="sd-name">${center.name}</div>
+    <div class="sd-loc">📍 ${center.location || ''}</div>
+    <div class="sd-headbox">
+      <div class="sd-headlabel">Current Head</div>
+      <div class="sd-headname">${head.name || 'Head not on file'}</div>
+      <div class="sd-headdesig">${head.designation || ''}</div>
+    </div>
+    <div class="sd-actions">
+      ${head.phone ? `<a class="sd-btn sd-call" href="tel:${head.phone}">📞 Call</a>` : ''}
+      <button type="button" class="sd-btn sd-vc">🎥 Video call</button>
+    </div>
+    <div class="sd-hint">Click the pin for the full drill-down (CCTV, compliance)</div>`;
+  el.querySelector('.sd-vc').addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onVideoCall(center);
+  });
+  return el;
+};
 
 /** Loads the Google Maps JS API once, with the key served by our backend. */
 const loadGoogleMaps = (key) =>
@@ -74,8 +130,13 @@ const GISMap = () => {
   const [tick, setTick] = useState(0);
 
   const mapRef = useRef(null);
-  const gRef = useRef(null); // { map, markers }
+  const gRef = useRef(null); // { map, markers, info }
   const lRef = useRef(null); // { map, layer, L }
+  const pinCardsRef = useRef(new Map()); // center id -> hover-card element
+  const pinTimerRef = useRef(null);
+  const vcHandlerRef = useRef(null);
+  const [vcNotice, setVcNotice] = useState(null);
+  const [vcBusy, setVcBusy] = useState(null);
   const navigate = useNavigate();
 
   const centers = useMemo(() => data?.centers || [], [data]);
@@ -89,6 +150,75 @@ const GISMap = () => {
   );
   const activeCameras = activeCenter?.cameras || [];
   const onlineCameras = activeCameras.filter((c) => c.online).length;
+
+  /* ---------------------------------------------------- pin hover cards */
+  const hidePinCard = () => {
+    if (gRef.current?.info) gRef.current.info.close();
+  };
+
+  const schedulePinClose = () => {
+    clearTimeout(pinTimerRef.current);
+    pinTimerRef.current = setTimeout(hidePinCard, 320);
+  };
+
+  const getPinCard = (center) => {
+    if (!pinCardsRef.current.has(center.id)) {
+      const card = buildPinCard(center, (c) => vcHandlerRef.current && vcHandlerRef.current(c));
+      // Keep the card open while the pointer is on it (buttons stay clickable).
+      card.addEventListener('mouseenter', () => clearTimeout(pinTimerRef.current));
+      card.addEventListener('mouseleave', () => schedulePinClose());
+      pinCardsRef.current.set(center.id, card);
+    }
+    return pinCardsRef.current.get(center.id);
+  };
+
+  const openPinCard = (center, marker) => {
+    clearTimeout(pinTimerRef.current);
+    if (!gRef.current?.info) return;
+    gRef.current.info.setContent(getPinCard(center));
+    gRef.current.info.open({ map: gRef.current.map, anchor: marker });
+  };
+
+  /** Opens a live (encrypted, Jitsi) video room for this center's head. */
+  const startVideoCall = async (center) => {
+    if (!center) return;
+    setVcBusy(center.id);
+    const cardButton = pinCardsRef.current.get(center.id)?.querySelector('.sd-vc');
+    if (cardButton) {
+      cardButton.disabled = true;
+      cardButton.textContent = '🎥 Connecting…';
+    }
+    const win = window.open('', '_blank');
+    try {
+      const { data: body } = await vcAPI.create({ project_id: center.id, mode: 'direct' });
+      const session = body?.session || {};
+      if (win && session.join_url) {
+        win.location.href = session.join_url;
+        setVcNotice(
+          `🎥 VC room ${session.room_id} opened with ${center.head?.name || center.name}` +
+            (session.official_name ? ` · official on the line: ${session.official_name}` : '') + '.'
+        );
+      } else {
+        if (win) win.close();
+        setVcNotice(`A room was created but the popup was blocked - open it here: ${session.join_url || ''}`);
+      }
+    } catch (err) {
+      if (win) win.close();
+      setVcNotice(err.response?.data?.message || 'Could not open a video-call session.');
+    } finally {
+      if (cardButton) {
+        cardButton.disabled = false;
+        cardButton.textContent = '🎥 Video call';
+      }
+      setVcBusy(null);
+    }
+  };
+  vcHandlerRef.current = startVideoCall;
+
+  // Cards embed name/head, so rebuild them whenever fresh data arrives.
+  useEffect(() => {
+    pinCardsRef.current.clear();
+  }, [data]);
 
   const load = async () => {
     setLoading(true);
@@ -140,7 +270,11 @@ const GISMap = () => {
       fullscreenControl: true,
       clickableIcons: false,
     });
-    gRef.current = { map, markers: [] };
+    gRef.current = { map, markers: [], info: new g.InfoWindow({ disableAutoPan: true }) };
+    // A click anywhere on the map dismisses a lingering hover card.
+    map.addListener('click', () => {
+      if (gRef.current?.info) gRef.current.info.close();
+    });
     // If Google rejects the key after (lazy) auth, degrade to OSM instead of a grey map.
     window.gm_authFailure = () => {
       setEngine('leaflet');
@@ -203,6 +337,8 @@ const GISMap = () => {
           },
         });
         marker.addListener('click', () => setActiveId(center.id));
+        marker.addListener('mouseover', () => openPinCard(center, marker));
+        marker.addListener('mouseout', () => schedulePinClose());
         return marker;
       });
       if (activeCenter.geo_coords?.lat) {
@@ -225,7 +361,13 @@ const GISMap = () => {
             fillOpacity: selected ? 1 : 0.85,
           }
         )
-          .bindTooltip(center.name, { direction: 'top' })
+          .bindTooltip(getPinCard(center), {
+            direction: 'top',
+            offset: [0, -10],
+            opacity: 1,
+            interactive: true,
+            className: 'sd-pin-tip',
+          })
           .on('click', () => setActiveId(center.id))
           .addTo(layer);
       });
@@ -255,6 +397,7 @@ const GISMap = () => {
 
   return (
     <Box>
+      <style>{PIN_CARD_CSS}</style>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 2 }}>
         <Box>
           <Typography variant="h4" sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -353,7 +496,7 @@ const GISMap = () => {
             ))}
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.7 }}>
               <LocationIcon sx={{ fontSize: 14 }} />
-              <span>Click a center pin (or a facility in the list) to open its in-charge and ground-level CCTV.</span>
+              <span>Hover a pin for the department head + call / video-call actions · click a pin for the full drill-down.</span>
             </Box>
           </Box>
         </Grid>
@@ -475,6 +618,28 @@ const GISMap = () => {
                         {activeCenter.head.since && (
                           <Chip size="small" label={`In-charge since ${activeCenter.head.since}`} variant="outlined" />
                         )}
+                      </Stack>
+                      <Stack direction="row" spacing={1} sx={{ mt: 1.25 }} flexWrap="wrap" useFlexGap>
+                        {activeCenter.head.phone && (
+                          <Button
+                            component="a"
+                            href={`tel:${activeCenter.head.phone}`}
+                            size="small"
+                            variant="outlined"
+                            startIcon={<PhoneIcon />}
+                          >
+                            Call head
+                          </Button>
+                        )}
+                        <Button
+                          size="small"
+                          variant="contained"
+                          startIcon={<VideocamIcon />}
+                          onClick={() => startVideoCall(activeCenter)}
+                          disabled={vcBusy === activeCenter.id}
+                        >
+                          {vcBusy === activeCenter.id ? 'Connecting…' : 'Video call head'}
+                        </Button>
                       </Stack>
                     </>
                   ) : (
@@ -656,6 +821,14 @@ const GISMap = () => {
           </Box>
         </Grid>
       </Grid>
+
+      <Snackbar
+        open={Boolean(vcNotice)}
+        autoHideDuration={7000}
+        onClose={() => setVcNotice(null)}
+        message={vcNotice}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      />
     </Box>
   );
 };

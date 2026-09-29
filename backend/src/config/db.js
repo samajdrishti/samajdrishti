@@ -88,6 +88,16 @@ const SCHEMA = `
     geo_coords POINT,
     timestamp TIMESTAMP,
     verified BOOLEAN DEFAULT false,
+    -- Evidence integrity chain (see evidenceController): the file is hashed on
+    -- upload and linked to the previous item of the same inspection, so any
+    -- post-hoc edit of the stored file is detectable.
+    sha256_hash VARCHAR(64),
+    previous_hash VARCHAR(64),
+    file_size BIGINT,
+    mime_type VARCHAR(120),
+    hash_verified BOOLEAN DEFAULT false,
+    verified_at TIMESTAMP,
+    integrity_status VARCHAR(20) DEFAULT 'unverified',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -160,6 +170,22 @@ const SCHEMA = `
   );
 `;
 
+/**
+ * Additive migrations for databases created before the evidence-integrity
+ * chain existed. `CREATE TABLE IF NOT EXISTS` above never alters an existing
+ * table, so these run on every PostgreSQL boot and are no-ops once applied.
+ */
+const MIGRATIONS = `
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS metadata JSONB;
+  ALTER TABLE evidence ADD COLUMN IF NOT EXISTS sha256_hash VARCHAR(64);
+  ALTER TABLE evidence ADD COLUMN IF NOT EXISTS previous_hash VARCHAR(64);
+  ALTER TABLE evidence ADD COLUMN IF NOT EXISTS file_size BIGINT;
+  ALTER TABLE evidence ADD COLUMN IF NOT EXISTS mime_type VARCHAR(120);
+  ALTER TABLE evidence ADD COLUMN IF NOT EXISTS hash_verified BOOLEAN DEFAULT false;
+  ALTER TABLE evidence ADD COLUMN IF NOT EXISTS verified_at TIMESTAMP;
+  ALTER TABLE evidence ADD COLUMN IF NOT EXISTS integrity_status VARCHAR(20) DEFAULT 'unverified';
+`;
+
 const connectPostgres = async () => {
   const client = await postgresPool.connect();
   try {
@@ -184,6 +210,7 @@ const initDB = async () => {
     try {
       await connectPostgres();
       await driver.query(SCHEMA);
+      await driver.query(MIGRATIONS);
       activeMode = 'postgres';
       console.log('[db] Tables created/verified (PostgreSQL persistent mode)');
       return activeMode;

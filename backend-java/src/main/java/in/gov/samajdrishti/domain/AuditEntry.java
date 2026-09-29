@@ -56,6 +56,30 @@ public class AuditEntry {
     @Column(name = "meta", columnDefinition = "text")
     private String metaRaw;
 
+    /**
+     * The client IP the action came from.
+     *
+     * <p>Absent before this column existed, which is why "who changed this" was answerable
+     * but "from where" was not. For accountability in a system where credentials are
+     * shared between officers it is the difference between an audit trail and a log.
+     */
+    @Column(name = "ip_address", length = 64)
+    private String ipAddress;
+
+    /**
+     * The state before the change, as JSON.
+     *
+     * <p>{@link #meta} already carries this for most call sites, but as an unlabelled
+     * blob. Splitting the two sides out means "what did this row look like before it was
+     * changed" is answerable with a query rather than by reading every meta payload.
+     */
+    @Column(name = "old_value", columnDefinition = "text")
+    private String oldValue;
+
+    /** The state after the change, as JSON. */
+    @Column(name = "new_value", columnDefinition = "text")
+    private String newValue;
+
     @Column(name = "created_at")
     private Instant createdAt;
 
@@ -135,6 +159,30 @@ public class AuditEntry {
 
     public void setEntityId(Integer entityId) {
         this.entityId = entityId;
+    }
+
+    public String getIpAddress() {
+        return ipAddress;
+    }
+
+    public void setIpAddress(String ipAddress) {
+        this.ipAddress = ipAddress;
+    }
+
+    public String getOldValue() {
+        return oldValue;
+    }
+
+    public void setOldValue(String oldValue) {
+        this.oldValue = oldValue;
+    }
+
+    public String getNewValue() {
+        return newValue;
+    }
+
+    public void setNewValue(String newValue) {
+        this.newValue = newValue;
     }
 
     public Instant getCreatedAt() {

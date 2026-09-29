@@ -28,6 +28,25 @@ public class Inspection {
     @Column(name = "project_id")
     private Integer projectId;
 
+    /**
+     * The institution being inspected.
+     *
+     * <p>Distinct from {@link #projectId}: the project is the funded work, the institution
+     * is the monitored site. They are usually the same pair, so {@code institutionId} is
+     * resolved from the project's institution on read - it is stored here because an
+     * inspection must remain pointable at the site it visited even if the funding record
+     * is later re-pointed.
+     */
+    @Column(name = "institution_id")
+    private Integer institutionId;
+
+    @Column(name = "assignment_id")
+    private Integer assignmentId;
+
+    /** Human-facing reference, e.g. {@code INS-10482}. Generated when absent. */
+    @Column(name = "inspection_code", length = 24)
+    private String inspectionCode;
+
     @Column(name = "assigned_to")
     private Integer assignedTo;
 
@@ -46,6 +65,41 @@ public class Inspection {
 
     @Column(name = "ai_risk_score", precision = 5, scale = 2)
     private BigDecimal aiRiskScore;
+
+    /**
+     * Set once the geofence has passed. Written by the location service, read by the
+     * state machine: {@code IN_PROGRESS} is not reachable from {@code ACCEPTED} without
+     * it, so this is what makes "the officer really was on site" a stored fact rather
+     * than a log line.
+     */
+    @Column(name = "gps_verified", nullable = false)
+    private boolean gpsVerified;
+
+    @Column(name = "gps_verified_at")
+    private Instant gpsVerifiedAt;
+
+    @Column(name = "gps_distance_meters")
+    private Double gpsDistanceMeters;
+
+    @Column(name = "gps_verdict", length = 30)
+    private String gpsVerdict;
+
+    /** {@code none}, {@code requested}, {@code active} or {@code ended} - the VC join state. */
+    @Column(name = "vc_status", length = 20)
+    private String vcStatus = "none";
+
+    @Column(name = "start_time")
+    private Instant startTime;
+
+    @Column(name = "end_time")
+    private Instant endTime;
+
+    @Column(name = "submitted_at")
+    private Instant submittedAt;
+
+    /** {@code routine}, {@code surprise} or {@code risk_targeted}. */
+    @Column(name = "inspection_type", length = 30)
+    private String inspectionType = "routine";
 
     @Column(name = "notes", columnDefinition = "text")
     private String notes;
@@ -67,6 +121,30 @@ public class Inspection {
 
     public void setProjectId(Integer projectId) {
         this.projectId = projectId;
+    }
+
+    public Integer getInstitutionId() {
+        return institutionId;
+    }
+
+    public void setInstitutionId(Integer institutionId) {
+        this.institutionId = institutionId;
+    }
+
+    public Integer getAssignmentId() {
+        return assignmentId;
+    }
+
+    public void setAssignmentId(Integer assignmentId) {
+        this.assignmentId = assignmentId;
+    }
+
+    public String getInspectionCode() {
+        return inspectionCode;
+    }
+
+    public void setInspectionCode(String inspectionCode) {
+        this.inspectionCode = inspectionCode;
     }
 
     public Integer getAssignedTo() {
@@ -115,6 +193,78 @@ public class Inspection {
 
     public void setAiRiskScore(BigDecimal aiRiskScore) {
         this.aiRiskScore = aiRiskScore;
+    }
+
+    public boolean isGpsVerified() {
+        return gpsVerified;
+    }
+
+    public void setGpsVerified(boolean gpsVerified) {
+        this.gpsVerified = gpsVerified;
+    }
+
+    public Instant getGpsVerifiedAt() {
+        return gpsVerifiedAt;
+    }
+
+    public void setGpsVerifiedAt(Instant gpsVerifiedAt) {
+        this.gpsVerifiedAt = gpsVerifiedAt;
+    }
+
+    public Double getGpsDistanceMeters() {
+        return gpsDistanceMeters;
+    }
+
+    public void setGpsDistanceMeters(Double gpsDistanceMeters) {
+        this.gpsDistanceMeters = gpsDistanceMeters;
+    }
+
+    public String getGpsVerdict() {
+        return gpsVerdict;
+    }
+
+    public void setGpsVerdict(String gpsVerdict) {
+        this.gpsVerdict = gpsVerdict;
+    }
+
+    public String getVcStatus() {
+        return vcStatus;
+    }
+
+    public void setVcStatus(String vcStatus) {
+        this.vcStatus = vcStatus;
+    }
+
+    public Instant getStartTime() {
+        return startTime;
+    }
+
+    public void setStartTime(Instant startTime) {
+        this.startTime = startTime;
+    }
+
+    public Instant getEndTime() {
+        return endTime;
+    }
+
+    public void setEndTime(Instant endTime) {
+        this.endTime = endTime;
+    }
+
+    public Instant getSubmittedAt() {
+        return submittedAt;
+    }
+
+    public void setSubmittedAt(Instant submittedAt) {
+        this.submittedAt = submittedAt;
+    }
+
+    public String getInspectionType() {
+        return inspectionType;
+    }
+
+    public void setInspectionType(String inspectionType) {
+        this.inspectionType = inspectionType;
     }
 
     public String getNotes() {

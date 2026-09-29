@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Samaj Drishti — Architecture Diagrams</title>
+<style>
+  body { font-family: 'Segoe UI', system-ui, sans-serif; margin: 0; padding: 28px; background: #f5f7fa; color: #1e293b; }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  h1 { color: #1a5276; font-size: 26px; margin: 0 0 4px; }
+  .sub { color: #64748b; margin: 0 0 20px; font-size: 14px; }
+  .bar { display: flex; gap: 10px; margin-bottom: 22px; }
+  button { background: #1a5276; color: #fff; border: 0; border-radius: 6px; padding: 9px 16px; font-size: 13px; cursor: pointer; }
+  button:hover { background: #2e86c1; }
+  .card { background: #fff; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,.08); padding: 20px; margin-bottom: 26px; }
+  h2 { font-size: 16px; color: #1a5276; margin: 0 0 4px; text-transform: uppercase; letter-spacing: .6px; }
+  .note { font-size: 12.5px; color: #64748b; margin: 0 0 14px; }
+  .mermaid { display: flex; justify-content: center; }
+  @media print { body { background: #fff; } .bar { display: none; } .card { box-shadow: none; border: 1px solid #e2e8f0; page-break-inside: avoid; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🛡️ Samaj Drishti — System Architecture (as built)</h1>
+  <p class="sub">Problem Statement 26095 · DoSJE · every diagram is generated from the source in <code>docs/HLD-LLD.md</code></p>
+  <div class="bar">
+    <button onclick="window.print()">🖨️ Print / Save as PDF</button>
+  </div>
+
+  <div class="card">
+    <h2>1 · System architecture</h2>
+    <p class="note">Two client apps, one API process (REST + Socket.IO), one AI engine, one database.</p>
+    <pre class="mermaid">
+flowchart TB
+  subgraph L1["CLIENT LAYER"]
+    MA["Field App (PWA)<br/>React 18 + Vite<br/>officials · offline-first"]
+    DA["Department Dashboard<br/>React 18 + MUI<br/>Command Center"]
+  end
+  subgraph L2["API LAYER (:5000)"]
+    EX["Express REST API<br/>auth · inspections · evidence<br/>attendance · monitoring · vc<br/>reports · audit · atr · gis"]
+    RT["Socket.IO<br/>alert · notification<br/>inspection:update · vc:invite<br/>monitoring:tick (5s)"]
+  end
+  subgraph L3["AI ENGINE (:5001)"]
+    AE["anomaly_detector<br/>Isolation Forest → robust z-score"]
+    MA2["attendance_analyzer<br/>late · geo_mismatch · proxy"]
+    GV["geo_verifier<br/>haversine verdict"]
+    RS["risk_scorer<br/>0-100 + factors"]
+    RA["random_assigner<br/>risk-weighted random"]
+    LLM["llm.py<br/>Groq + local fallback"]
+  end
+  subgraph L4["DATA LAYER"]
+    PG[("PostgreSQL<br/>10 tables")]
+    MS[("In-memory demo store<br/>auto-fallback")]
+    UP[("uploads/evidence<br/>SHA-256 chain")]
+  end
+  subgraph L5["EXTERNAL"]
+    JI["Jitsi Meet<br/>random VC rooms"]
+    GM["Google Maps JS<br/>(OSM fallback)"]
+    CCTV["CCTV<br/>simulated | MJPEG | HLS"]
+  end
+  MA -->|"REST + WS"| EX
+  DA -->|"REST + WS"| EX
+  EX <--> RT
+  EX -->|geo-verify then AI| AE
+  EX --> PG
+  EX -.->|"PG unreachable"| MS
+  EX --> UP
+  AE --> MA2 & GV & RS & RA & LLM
+  EX --> JI & CCTV
+  DA --> GM
+    </pre>
+  </div>
+
+  <div class="card">
+    <h2>2 · Field capture → geo-verification → AI (the closed loop)</h2>
+    <pre class="mermaid">
+sequenceDiagram
+  participant O as Official (PWA)
+  participant Q as Offline queue
+  participant A as API :5000
+  participant G as geoService
+  participant E as AI engine :5001
+  participant D as Dashboard
+  O->>O: capture photo + GPS + checklist
+  O->>Q: queue (offline-safe)
+  Q->>A: replay multipart + geo-tag
+  A->>G: haversine(site, device)
+  G-->>A: verified | mismatch | suspicious
+  A->>A: hash evidence + audit + socket emit
+  A->>E: anomaly / risk / attendance
+  E-->>A: anomalies + risk (never fails)
+  A-->>D: risk + verdict + alert
+    </pre>
+  </div>
+
+  <div class="card">
+    <h2>3 · Evidence integrity chain (tamper-evident vault)</h2>
+    <pre class="mermaid">
+flowchart LR
+  U["Officer uploads<br/>geo-tagged file"] --> H["SHA-256 computed<br/>on the server"]
+  H --> L["previous_hash linked<br/>chain per inspection"]
+  L --> S["Stored evidence row<br/>sha256 · previous_hash · size"]
+  S --> V["Back-office verify<br/>re-hashes the file"]
+  V -->|match| OK["INTEGRITY OK<br/>verified = true"]
+  V -->|mismatch| BAD["TAMPERED<br/>verified = false"]
+  BAD --> A["audit: evidence.integrity_failed<br/>+ realtime alert"]
+  OK --> P["Signed off"]
+    </pre>
+  </div>
+
+  <div class="card">
+    <h2>4 · GIS centre drill-down</h2>
+    <pre class="mermaid">
+flowchart TB
+  M["GET /api/gis/centers"] --> Pin["Map pin per centre<br/>scheme colour · red = flagged"]
+  Pin -->|"hover"| Hov["InfoWindow card<br/>department · current head<br/>Call (tel:) · Video call"]
+  Pin -->|"click"| Panel["Drill-down panel<br/>compliance grid"]
+  Panel --> CCTV["GROUND-LEVEL CCTV LIVE<br/>4s refresh · tamper chips<br/>AI headcount vs AEBAS"]
+  Hov --> VC["POST /api/vc/sessions<br/>Jitsi room + audit + notify"]
+    </pre>
+  </div>
+
+  <div class="card">
+    <h2>5 · AI degradation ladder</h2>
+    <pre class="mermaid">
+flowchart LR
+  A["Isolation Forest"] -->|"DLL blocked"| B["NumPy robust z-score<br/>+ domain rules"]
+  B -->|"batch &lt; 8 rows"| C["Rule-based screening"]
+  D["LLM provider"] -->|"no key / offline"| E["Deterministic local narrative"]
+  C --> F["/api/health reports<br/>anomaly_backend + llm_provider"]
+  E --> F
+    </pre>
+  </div>
+</div>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    themeVariables: {
+      primaryColor: '#2e86c1', primaryTextColor: '#ffffff', primaryBorderColor: '#1a5276',
+      lineColor: '#34495e', secondaryColor: '#27ae60', tertiaryColor: '#8e44ad',
+      fontSize: '14px', fontFamily: 'Segoe UI, system-ui, sans-serif'
+    }
+  });
+</script>
+</body>
+</html>

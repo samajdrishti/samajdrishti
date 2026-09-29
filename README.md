@@ -15,9 +15,14 @@ samaj-drishti/
 ├── mobile-web/       # Field app - installable PWA for officials (port 5174)
 ├── mobile/           # Legacy React Native app (needs Android SDK; PWA is the demo path)
 ├── ai-engine/        # Python ML + LLM engine (port 5001)
-├── docs/             # API contract and architecture notes
-└── prototype-plan.md # Detailed prototype plan
+├── backend-java/     # Spring Boot twin of the same API contract
+├── docs/             # API contract, as-built HLD/LLD, rendered diagrams
+├── scripts/          # e2e-check.mjs (82 checks) + integrity-check.mjs (20 checks)
+└── logs/             # dev-server / build / test output (git-ignored, safe to delete)
 ```
+
+> The prototype plan (`prototype-plan.md`) and the classic architecture drawing
+> (`architecture-diagram.html`) live one level up, in the workspace root.
 
 ## 🚀 Quick Start
 
@@ -36,21 +41,23 @@ Open <http://localhost:5174> on a phone (or the laptop) for the inspector app an
 
 ### Why a PWA instead of the React Native app
 
-No Android SDK/JDK is available on this machine, so the field app is shipped as
+No Android SDK is available on this machine, so the field app is shipped as
 an **installable PWA**: "Add to Home Screen" gives a full-screen, offline-capable
 app on Android and iOS, and it runs unchanged in a desktop browser. `mobile-web/`
 uses the same API, geo-fencing and offline queue as the React Native app in
-`mobile/`, which is kept for teams that do have a mobile toolchain.
+`mobile/`, which is kept for teams that do have a mobile toolchain. (A JDK 17 +
+Maven are installed as of this writing, which is why `backend-java/` can now be
+compiled and tested here — only the Android SDK is still missing.)
 
 ### Data storage
 
 `.env` is loaded automatically. On boot the API tries PostgreSQL and, if the
 server is unreachable, falls back to an **in-memory demo dataset** seeded with
-8 projects, ~29 inspections, cameras, 14 days of attendance and audit history:
+10 projects, 29 inspections, cameras, 14 days of attendance and audit history:
 
 ```
 [db] PostgreSQL unreachable (ECONNREFUSED) - falling back to in-memory demo mode.
-[db] In-memory demo data loaded: 8 projects, 23 inspections, 8 evidence records, 6 users.
+[db] In-memory demo data loaded: 10 projects, 29 inspections, 14 evidence records, 8 users.
 ```
 
 Set `DB_MODE=postgres` in production — the API then refuses to start without a
@@ -229,6 +236,7 @@ refuses to start if the database is down, which is what you want in deployment.
 
 - ✅ Offline-first design (works without internet)
 - ✅ Geo-tagged evidence capture
+- ✅ Tamper-evident evidence vault (SHA-256 chain, re-hashed on sign-off — `node scripts/integrity-check.mjs`)
 - ✅ Role-based authentication
 - ✅ AI-powered risk scoring
 - ✅ Random inspection assignment
@@ -320,6 +328,16 @@ admin dashboard served on port 5173, mobile upload contract exercised with
 
 ## 📄 References
 
+### Design documents
+- [As-Built HLD & LLD](docs/HLD-LLD.md) - architecture, data flows, component inventory, runtime
+  topology, the honest blueprint-vs-as-built gap map, the 7-minute demo script and the scale roadmap.
+  Every diagram is Mermaid - paste a block into <https://mermaid.live> and export SVG for slides.
+- [API contract v2](docs/API-CONTRACT.md) - every endpoint, the Socket.IO event table, error shapes
+- [Architecture diagrams](docs/diagrams.html) - the five diagrams of this document rendered (open in a
+  browser, then *Print / Save as PDF* for slides)
+- [Prototype plan](prototype-plan.md) - phase plan and success criteria
+
+### External
 - [DoSJE Official Site](https://www.dosje.gov.in/)
 - [GitHub Repository](https://github.com/samajdrishti/samajdrishti)
 

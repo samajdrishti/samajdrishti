@@ -10,5 +10,9 @@ public interface CameraRepository extends JpaRepository<Camera, Integer> {
 
     List<Camera> findAllByOrderByIdAsc();
 
+    List<Camera> findByProjectId(Integer projectId);
+
     long countByStatus(String status);
+
+    long countByProjectIdAndStatus(Integer projectId, String status);
 }

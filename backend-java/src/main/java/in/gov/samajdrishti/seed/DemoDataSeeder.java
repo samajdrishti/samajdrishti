@@ -1,11 +1,16 @@
 package in.gov.samajdrishti.seed;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -20,28 +25,41 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import in.gov.samajdrishti.config.AppProperties;
+import in.gov.samajdrishti.domain.Anomaly;
 import in.gov.samajdrishti.domain.Attendance;
+import in.gov.samajdrishti.domain.AttendanceRecord;
 import in.gov.samajdrishti.domain.Atr;
 import in.gov.samajdrishti.domain.AuditEntry;
 import in.gov.samajdrishti.domain.BeneficiaryFeedback;
 import in.gov.samajdrishti.domain.Camera;
+import in.gov.samajdrishti.domain.ChecklistItem;
 import in.gov.samajdrishti.domain.Evidence;
 import in.gov.samajdrishti.domain.GeoPoint;
 import in.gov.samajdrishti.domain.Inspection;
+import in.gov.samajdrishti.domain.InspectionAssignment;
+import in.gov.samajdrishti.domain.InspectionReport;
+import in.gov.samajdrishti.domain.Institution;
 import in.gov.samajdrishti.domain.Notification;
 import in.gov.samajdrishti.domain.Project;
 import in.gov.samajdrishti.domain.User;
 import in.gov.samajdrishti.domain.VcJoinLog;
 import in.gov.samajdrishti.domain.VcSession;
+import in.gov.samajdrishti.repository.AnomalyRepository;
+import in.gov.samajdrishti.repository.AttendanceRecordRepository;
 import in.gov.samajdrishti.repository.AttendanceRepository;
 import in.gov.samajdrishti.repository.AtrRepository;
 import in.gov.samajdrishti.repository.AuditRepository;
 import in.gov.samajdrishti.repository.BeneficiaryFeedbackRepository;
 import in.gov.samajdrishti.repository.CameraRepository;
+import in.gov.samajdrishti.repository.ChecklistItemRepository;
 import in.gov.samajdrishti.repository.EvidenceRepository;
+import in.gov.samajdrishti.repository.InspectionAssignmentRepository;
+import in.gov.samajdrishti.repository.InspectionReportRepository;
 import in.gov.samajdrishti.repository.InspectionRepository;
+import in.gov.samajdrishti.repository.InstitutionRepository;
 import in.gov.samajdrishti.repository.NotificationRepository;
 import in.gov.samajdrishti.repository.ProjectRepository;
+import in.gov.samajdrishti.service.InspectionAttendanceService;
 import in.gov.samajdrishti.repository.UserRepository;
 import in.gov.samajdrishti.repository.VcJoinLogRepository;
 import in.gov.samajdrishti.repository.VcSessionRepository;
@@ -76,6 +94,12 @@ public class DemoDataSeeder implements ApplicationRunner {
     private final AuditRepository audit;
     private final AtrRepository atrs;
     private final BeneficiaryFeedbackRepository feedback;
+    private final InstitutionRepository institutions;
+    private final InspectionAssignmentRepository assignments;
+    private final AttendanceRecordRepository attendanceRecords;
+    private final ChecklistItemRepository checklistItems;
+    private final AnomalyRepository anomalies;
+    private final InspectionReportRepository reports;
 
     public DemoDataSeeder(AppProperties properties,
                           PasswordEncoder passwordEncoder,
@@ -89,8 +113,14 @@ public class DemoDataSeeder implements ApplicationRunner {
                           VcSessionRepository vcSessions,
                           VcJoinLogRepository vcJoinLogs,
                           AuditRepository audit,
-                          AtrRepository atrs,
-                          BeneficiaryFeedbackRepository feedback) {
+                           AtrRepository atrs,
+                           BeneficiaryFeedbackRepository feedback,
+                           InstitutionRepository institutions,
+                           InspectionAssignmentRepository assignments,
+                           AttendanceRecordRepository attendanceRecords,
+                           ChecklistItemRepository checklistItems,
+                           AnomalyRepository anomalies,
+                           InspectionReportRepository reports) {
         this.properties = properties;
         this.passwordEncoder = passwordEncoder;
         this.users = users;
@@ -105,6 +135,12 @@ public class DemoDataSeeder implements ApplicationRunner {
         this.audit = audit;
         this.atrs = atrs;
         this.feedback = feedback;
+        this.institutions = institutions;
+        this.assignments = assignments;
+        this.attendanceRecords = attendanceRecords;
+        this.checklistItems = checklistItems;
+        this.anomalies = anomalies;
+        this.reports = reports;
     }
 
     @Override
@@ -119,20 +155,98 @@ public class DemoDataSeeder implements ApplicationRunner {
             return;
         }
         seed();
-        log.info("[seed] demo data loaded: {} projects, {} inspections, {} evidence records, {} users.",
-                projects.count(), inspections.count(), evidence.count(), users.count());
+        log.info("[seed] demo data loaded: {} projects, {} institutions, {} inspections, "
+                        + "{} evidence records, {} anomalies, {} ATRs, {} users.",
+                projects.count(), institutions.count(), inspections.count(),
+                evidence.count(), anomalies.count(), atrs.count(), users.count());
         log.info("[seed] demo logins -> admin@samajdrishti.gov.in / Admin@123");
     }
 
     private void seed() {
         seedUsers();
+        seedInstitutions();
         seedOperations();
         seedMonitoring();
     }
 
     /* ------------------------------------------------------------------ users */
 
+    /**
+     * Institution types and geofence radii for the seeded sites.
+     *
+     * <p>The radii are deliberately varied: a 50-bed home in a dense area and a campus spread
+     * over several acres need different fences, and seeding them differently is what makes the
+     * per-site radius visible in a demo rather than an abstract column.
+     */
+    private record DemoInstitution(String type, Double geofenceRadius, Integer sanctionedCapacity, String incharge) {
+    }
+
+    private static final Map<String, DemoInstitution> INSTITUTION_PROFILES = Map.of(
+            "AVYAY", new DemoInstitution("home", 250d, 50, "S. Ramasamy"),
+            "NAPDDR", new DemoInstitution("rehab_centre", 600d, 45, "P. Anitha"),
+            "SIPDA", new DemoInstitution("special_school", 400d, 60, "K. Venkatesan"));
+
     private record DemoUser(String name, String email, String role, String department, String phone) {
+    }
+
+    /** Gives every official a district so the §16 eligibility filter has something to work on. */
+    private void seedInstitutions() {
+        for (Project project : projects.findAll()) {
+            String scheme = project.getDepartment() == null
+                    ? "AVYAY" : project.getDepartment().toUpperCase();
+            DemoInstitution profile = INSTITUTION_PROFILES.getOrDefault(scheme,
+                    new DemoInstitution("home", 250d, 50, "Institution In-charge"));
+
+            Institution institution = new Institution();
+            institution.setProjectId(project.getId());
+            institution.setName(institutionNameOf(project));
+            institution.setType(profile.type());
+            institution.setScheme(scheme.toLowerCase());
+            institution.setAddress(project.getLocation());
+            institution.setDistrict("Coimbatore");
+            institution.setState("Tamil Nadu");
+            institution.setGeoCoords(project.getGeoCoords());
+            institution.setGeofenceRadius(profile.geofenceRadius());
+            // The blacklisted case study is flagged so the dashboard has a live example.
+            institution.setStatus("flagged".equals(project.getStatus()) ? "flagged" : "active");
+            institution.setSanctionedCapacity(capacityOf(project, profile.sanctionedCapacity()));
+            institution.setInchargeName(profile.incharge());
+            institution.setInchargePhone("+91 94422 " + (10000 + project.getId() * 7));
+            institution.setCreatedAt(project.getCreatedAt());
+            institutions.save(institution);
+        }
+
+        for (User user : users.findByRoleOrderByIdAsc("official")) {
+            // Only field officers carry a district; the other roles are not assignment candidates.
+            if (user.getDistrict() == null) {
+                user.setDistrict("Coimbatore");
+                user.setState("Tamil Nadu");
+                user.setUpdatedAt(Instant.now());
+                users.save(user);
+            }
+        }
+    }
+
+    private static String institutionNameOf(Project project) {
+        String name = project.getName();
+        int paren = name.indexOf(" (");
+        return paren > 0 ? name.substring(0, paren) : name;
+    }
+
+    /**
+     * The sanctioned capacity recorded in a project's metadata, if it declared one.
+     *
+     * <p>Read defensively: metadata is free-form JSON that an older seed row may not have, and
+     * a missing key should fall back to the scheme's default rather than fail the boot.
+     */
+    @SuppressWarnings("unchecked")
+    private static Integer capacityOf(Project project, Integer fallback) {
+        Object metadata = project.getMetadata();
+        if (!(metadata instanceof Map<?, ?> map)) {
+            return fallback;
+        }
+        Object sanctioned = ((Map<String, Object>) map).get("sanctioned_capacity");
+        return sanctioned instanceof Number number ? number.intValue() : fallback;
     }
 
     private static final List<DemoUser> DEMO_USERS = List.of(
@@ -331,23 +445,260 @@ public class DemoDataSeeder implements ApplicationRunner {
                     note = "Discrepancy observed between the reported beneficiary count and physical site headcount.";
                 }
 
+                int officerId = officialIds.get((pIdx + k) % officialIds.size());
+                Institution institution = institutions.findFirstByProjectId(project.getId()).orElse(null);
+
                 Inspection inspection = new Inspection();
                 inspection.setProjectId(project.getId());
-                inspection.setAssignedTo(officialIds.get((pIdx + k) % officialIds.size()));
+                inspection.setInstitutionId(institution == null ? null : institution.getId());
+                inspection.setAssignedTo(officerId);
                 inspection.setSupervisorId(supervisorId);
                 inspection.setStatus(status);
+                inspection.setInspectionCode("INS-%d".formatted(10000 + pIdx * 10L + k));
+                inspection.setInspectionType(risk.doubleValue() > 70 ? "risk_targeted" : "routine");
                 inspection.setScheduledDate(scheduled);
                 inspection.setCompletedDate(done ? scheduled : null);
                 inspection.setAiRiskScore(risk);
                 inspection.setNotes(note);
-                inspection.setCreatedAt(Instant.now().minusSeconds((25L - (pIdx * 2L + k)) * 86_400L));
+                // A completed or flagged visit is assumed to have been on site; a suspicious geo
+                // verdict is exactly what leaves gps_verified false, so that is how the seeded
+                // "flagged" inspections got their state.
+                if (done && !"flagged".equals(status)) {
+                    inspection.setGpsVerified(true);
+                    inspection.setGpsVerifiedAt(Instant.now().minusSeconds((pIdx * 2L + k + 1) * 86_400L));
+                    inspection.setGpsVerdict("verified");
+                } else if ("flagged".equals(status)) {
+                    inspection.setGpsVerdict("suspicious");
+                    inspection.setGpsDistanceMeters(41_300d);
+                }
+                if (done) {
+                    inspection.setStartTime(Instant.now().minusSeconds((pIdx * 2L + k + 1) * 86_400L));
+                    inspection.setEndTime(Instant.now().minusSeconds((pIdx * 2L + k) * 86_400L));
+                    inspection.setSubmittedAt(inspection.getEndTime());
+                }
                 inspections.save(inspection);
+
+                seedAssignment(inspection, officerId, project, done);
+                if (done) {
+                    seedInspectionDetail(inspection, project, institution, rand, k);
+                }
             }
         }
 
-        List<Inspection> finished = inspections.findAll().stream()
+        List<Inspection> finished = finishedInspections();
+        seedEvidence(finished);
+        seedFiledReports(finished);
+        seedAtrs();
+        seedFeedback();
+
+        Integer adminId = users.findByRoleOrderByIdAsc("admin").stream()
+                .findFirst().map(User::getId).orElse(null);
+        seedNotifications(adminId, officialIds);
+    }
+
+    private List<Inspection> finishedInspections() {
+        return inspections.findAll().stream()
                 .filter(i -> "completed".equals(i.getStatus()) || "flagged".equals(i.getStatus()))
                 .toList();
+    }
+
+    /**
+     * The ledger row behind an inspection.
+     *
+     * <p>Status tracks the inspection rather than being invented, so the history reads
+     * coherently: a completed visit was assigned, accepted, started and completed, in that
+     * order, with the timestamps spaced accordingly.
+     */
+    private void seedAssignment(Inspection inspection, Integer officerId, Project project, boolean done) {
+        InspectionAssignment assignment = new InspectionAssignment();
+        assignment.setInspectionId(inspection.getId());
+        assignment.setOfficerId(officerId);
+        assignment.setProjectId(project.getId());
+        assignment.setAssignmentType("random");
+        assignment.setPriority(inspection.getAiRiskScore() != null
+                && inspection.getAiRiskScore().doubleValue() > 70 ? "high" : "normal");
+        assignment.setScheduledDate(inspection.getScheduledDate());
+        assignment.setAiRiskScore(inspection.getAiRiskScore());
+        assignment.setCreatedAt(Instant.now().minusSeconds(32L * 86_400L));
+        assignment.setAssignedAt(Instant.now().minusSeconds(31L * 86_400L));
+        assignment.setStatus("assigned");
+        assignments.save(assignment);
+
+        inspection.setAssignmentId(assignment.getId());
+        inspections.save(inspection);
+
+        if (done) {
+            assignment.setStatus("completed");
+            assignment.setAcceptedAt(Instant.now().minusSeconds(30L * 86_400L));
+            assignment.setStartedAt(inspection.getStartTime());
+            assignment.setCompletedAt(inspection.getEndTime());
+            assignments.save(assignment);
+        }
+    }
+
+    /**
+     * Per-inspection evidence, beneficiary headcount, checklist and findings.
+     *
+     * <p>The Anugraha case study is seeded with the real anomaly it exists to demonstrate: 47
+     * beneficiaries marked present, 14 counted on the ground. Every other site gets a
+     * plausible headcount so the attendance feature is not uniformly alarming.
+     */
+    private void seedInspectionDetail(Inspection inspection, Project project, Institution institution,
+                                       Lcg rand, int k) {
+        boolean isCaseStudy = "flagged".equals(inspection.getStatus());
+        int registered = institution == null || institution.getSanctionedCapacity() == null
+                ? 50 : institution.getSanctionedCapacity();
+        int reported = registered;
+        int observed = isCaseStudy ? 14 : Math.max(1, registered - rand.nextInt(Math.max(2, registered / 12)));
+
+        AttendanceRecord attendance = new AttendanceRecord();
+        attendance.setInspectionId(inspection.getId());
+        attendance.setProjectId(project.getId());
+        attendance.setRecordedBy(inspection.getAssignedTo());
+        attendance.setRegisteredCount(registered);
+        attendance.setReportedCount(reported);
+        attendance.setObservedCount(observed);
+        attendance.setAttendancePercentage(InspectionAttendanceService.percentage(observed, registered));
+        attendance.setNotes(isCaseStudy
+                ? "AEBAS marked 47 present; the physical count was 14."
+                : "Physical count reconciled against the register.");
+        attendance.setCapturedAt(inspection.getEndTime());
+        attendance.setCreatedAt(inspection.getCreatedAt());
+        attendanceRecords.save(attendance);
+
+        seedChecklistItems(inspection, isCaseStudy);
+        seedAnomalies(inspection, observed, reported, registered, isCaseStudy);
+    }
+
+    /** Four of the six template items answered, which is enough to score a compliance figure. */
+    private void seedChecklistItems(Inspection inspection, boolean isCaseStudy) {
+        String[] codes = {"resident_headcount", "dietary_nutrition", "medical_log", "hygiene_bedding"};
+        int idx = 0;
+        for (String code : codes) {
+            boolean passed = isCaseStudy ? idx >= 2 : idx != 1;
+            ChecklistItem item = new ChecklistItem();
+            item.setInspectionId(inspection.getId());
+            item.setItemCode(code);
+            item.setSection("av");
+            item.setItem("Seeded item: " + code);
+            item.setWeight(20);
+            item.setStatus(passed ? "verified" : "failed");
+            item.setRemarks(passed ? "Verified on site."
+                    : "Observed deficiency during the visit; see the evidence for this inspection.");
+            item.setVerifiedAt(inspection.getEndTime());
+            item.setCreatedAt(inspection.getCreatedAt());
+            checklistItems.save(item);
+            idx++;
+        }
+    }
+
+    private void seedAnomalies(Inspection inspection, int observed, int reported, int registered,
+                               boolean isCaseStudy) {
+        if (observed < reported) {
+            int missing = reported - observed;
+            double ratio = registered == 0 ? 1d : missing / (double) registered;
+            anomalies.save(anomaly(inspection, "ATTENDANCE_MISMATCH",
+                    "Institution reported %d present but the officer counted %d on site "
+                            .formatted(reported, observed)
+                            + "(%d of %d on the roll unaccounted for, %.1f%%)."
+                                    .formatted(missing, registered, ratio * 100),
+                    ratio, ratio > 0.15 ? "high" : "medium", "attendance_discrepancy", isCaseStudy));
+        }
+
+        if (isCaseStudy) {
+            anomalies.save(anomaly(inspection, "INSPECTION_DEVIATION",
+                    "Report filed 41.3 km from the registered site - possible proxy or fake reporting.",
+                    0.92, "high", "haversine_geo", false));
+            anomalies.save(anomaly(inspection, "CCTV_UNAVAILABLE",
+                    "All 2 cameras at this institution were offline during the inspection.",
+                    0.85, "high", "camera_heartbeat", true));
+        }
+    }
+
+    private Anomaly anomaly(Inspection inspection, String type, String description, double confidence,
+                            String severity, String detector, boolean reviewed) {
+        Anomaly anomaly = new Anomaly();
+        anomaly.setInspectionId(inspection.getId());
+        anomaly.setProjectId(inspection.getProjectId());
+        anomaly.setType(type);
+        anomaly.setDescription(description);
+        anomaly.setConfidence(BigDecimal.valueOf(confidence).setScale(3, RoundingMode.HALF_UP));
+        anomaly.setSeverity(severity);
+        anomaly.setStatus(reviewed ? "confirmed" : "open");
+        anomaly.setSource("rule");
+        anomaly.setDetector(detector);
+        anomaly.setCreatedAt(inspection.getEndTime() == null ? Instant.now() : inspection.getEndTime());
+        // High-severity findings are deliberately left unreviewed so the dashboard's review
+        // queue is populated on first load rather than being empty on a fresh install.
+        anomaly.setHumanVerified(reviewed);
+        anomaly.setRequiresHumanReview(!reviewed);
+        if (reviewed) {
+            anomaly.setVerifiedBy(users.findByRoleOrderByIdAsc("supervisor").stream()
+                    .findFirst().map(User::getId).orElse(null));
+            anomaly.setVerifiedAt(anomaly.getCreatedAt().plusSeconds(3600));
+            anomaly.setVerifiedRemarks("Reconciled against the AEBAS register by the district office.");
+        }
+        return anomaly;
+    }
+
+    /**
+     * Filed reports for the finished inspections.
+     *
+     * <p>Seeded in every state a review can be in, so the supervisor's queue is not empty and
+     * the audit trail of a report decision is visible without having to drive the workflow.
+     */
+    private void seedFiledReports(List<Inspection> finished) {
+        String[] statuses = {"submitted", "submitted", "under_review", "approved", "rejected"};
+        for (int idx = 0; idx < finished.size(); idx++) {
+            Inspection inspection = finished.get(idx);
+            List<Anomaly> findings = anomalies.findByInspectionIdOrderByIdDesc(inspection.getId());
+            long evidenceCount = evidence.countByInspectionId(inspection.getId());
+            String status = statuses[idx % statuses.length];
+
+            InspectionReport report = new InspectionReport();
+            report.setInspectionId(inspection.getId());
+            report.setProjectId(inspection.getProjectId());
+            report.setOfficerId(inspection.getAssignedTo());
+            report.setSummary("Filed report for inspection %s. %d evidence item(s), %d finding(s), geo check %s."
+                    .formatted(inspection.getInspectionCode(), evidenceCount, findings.size(),
+                            inspection.getGpsVerdict() == null ? "not recorded" : inspection.getGpsVerdict()));
+            report.setFindings(findings.isEmpty() ? "none"
+                    : findings.stream().map(Anomaly::getType).distinct().toList().toString());
+            report.setRiskLevel(findings.stream().anyMatch(a -> "high".equals(a.getSeverity()))
+                    ? "high" : findings.isEmpty() ? "low" : "medium");
+            report.setReportStatus(status);
+            report.setSubmittedBy(inspection.getAssignedTo());
+            report.setSubmittedAt(inspection.getSubmittedAt() == null
+                    ? inspection.getCreatedAt() : inspection.getSubmittedAt());
+            report.setGeoVerdict(inspection.getGpsVerdict());
+            report.setDistanceMeters(inspection.getGpsDistanceMeters());
+            report.setEvidenceCount((int) evidenceCount);
+            report.setAnomalyCount(findings.size());
+            report.setComplianceScore(60);
+            report.setCreatedAt(report.getSubmittedAt());
+            if (!"submitted".equals(status) && !"under_review".equals(status)) {
+                report.setReviewedBy(users.findByRoleOrderByIdAsc("supervisor").stream()
+                        .findFirst().map(User::getId).orElse(null));
+                report.setReviewedAt(report.getSubmittedAt().plusSeconds(86_400L));
+                report.setReviewRemarks("approved".equals(status)
+                        ? "Findings accepted; corrective action tracked through the ATR."
+                        : "Corrective evidence did not demonstrate the fix.");
+            }
+            reports.save(report);
+
+            // Attach the report to the inspection where the state machine expects it.
+            if ("approved".equals(status)) {
+                inspection.setStatus("under_review");
+                inspections.save(inspection);
+            } else if ("rejected".equals(status)) {
+                inspection.setStatus("action_in_progress");
+                inspections.save(inspection);
+            }
+        }
+    }
+
+    /** Photo and video captures on the finished inspections. */
+    private void seedEvidence(List<Inspection> finished) {
         for (int idx = 0; idx < Math.min(10, finished.size()); idx++) {
             Inspection inspection = finished.get(idx);
             GeoPoint base = projectById(inspection.getProjectId()).getGeoCoords();
@@ -356,19 +707,21 @@ public class DemoDataSeeder implements ApplicationRunner {
             record.setInspectionId(inspection.getId());
             record.setType(video ? "video" : "photo");
             record.setFilePath("/uploads/evidence/demo-%d.%s".formatted(inspection.getId(), video ? "mp4" : "jpg"));
+            record.setUploadedBy(inspection.getAssignedTo());
+            record.setFileName("demo-%d.%s".formatted(inspection.getId(), video ? "mp4" : "jpg"));
+            record.setContentType(video ? "video/mp4" : "image/jpeg");
             record.setGeoCoords(new GeoPoint(base.getLat() + 0.0003, base.getLng() + 0.0003));
+            record.setAccuracy(8.0);
             record.setTimestamp(Instant.now().minusSeconds((idx + 1L) * 86_400L));
             record.setVerified(!"flagged".equals(inspection.getStatus()));
+            record.setSyncStatus("synced");
+            // Distinct per row: a shared hash would read as a duplicate upload to the
+            // evidence-integrity checks, which is the opposite of what the seed intends.
+            record.setFileHash(sha256("demo-evidence-%d-%d".formatted(inspection.getId(), idx)));
+            record.setClientId("seed-evidence-%d-%d".formatted(inspection.getId(), idx));
             record.setCreatedAt(Instant.now().minusSeconds((idx + 1L) * 86_400L));
             evidence.save(record);
         }
-
-        seedAtrs();
-        seedFeedback();
-
-        Integer adminId = users.findByRoleOrderByIdAsc("admin").stream()
-                .findFirst().map(User::getId).orElse(null);
-        seedNotifications(adminId, officialIds);
     }
 
     private void seedAtrs() {
@@ -718,6 +1071,23 @@ public class DemoDataSeeder implements ApplicationRunner {
     private Project projectById(Integer id) {
         return projects.findById(id).orElseThrow(
                 () -> new IllegalStateException("Demo project " + id + " is missing"));
+    }
+
+    /**
+     * A stable stand-in for a real file hash on seeded evidence.
+     *
+     * <p>Not a hash of any file, because there is no file: the seeded rows point at
+     * {@code /uploads/evidence/demo-N.jpg}, which does not exist on disk. What matters is that
+     * each value is distinct and the right length, so the duplicate-evidence check sees a
+     * normal set of unique uploads rather than N copies of one hash.
+     */
+    private static String sha256(String seed) {
+        try {
+            return HexFormat.of().formatHex(
+                    MessageDigest.getInstance("SHA-256").digest(seed.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is required by the JLS but unavailable", e);
+        }
     }
 
     /** Same linear congruential generator the previous seeder used, so the demo looks identical. */
