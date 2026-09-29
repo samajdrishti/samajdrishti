@@ -1,0 +1,34 @@
+# Samaj Drishti AI engine - Python 3.11+
+# Install into a virtualenv:  python -m venv .venv && .venv\Scripts\pip install -r requirements.txt
+
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.6
+
+# Analysis stack
+scikit-learn>=1.3.0
+pandas>=2.1.0
+numpy>=1.24.0
+
+# Computer vision - required by models/image_verifier.py (EXIF + re-capture
+# forensics) and models/cctv_analyzer.py (obstruction / tamper detection).
+# Pillow is mandatory: image_verifier imports PIL at module scope.
+Pillow>=10.0.0
+
+# Optional OpenCV backend for CCTV frame analysis. The detector runs on a
+# NumPy/Pillow fallback when this is unavailable, so install failures and
+# missing DLLs degrade gracefully instead of breaking the engine.
+opencv-python-headless>=4.9.0
+
+# Legacy Flask twin (ai-engine/app.py) - start-all.cmd still launches this file.
+# main.py (FastAPI) is the tested entrypoint; remove this block when you stop
+# launching app.py.
+flask>=3.0
+flask-cors>=4.0
+
+# Optional: PostgreSQL access for offline feature loading
+psycopg2-binary>=2.9.0
+
+# Tests
+httpx>=0.27
+pytest>=8.0

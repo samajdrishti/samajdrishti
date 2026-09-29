@@ -1,0 +1,19 @@
+{
+  "name": "DoSJE SmartInspect - Field Inspection",
+  "short_name": "SmartInspect",
+  "description": "Real-time inspection, verified evidence, transparent governance. Geo-tagged inspections, live CCTV monitoring and random video verification for DoSJE schemes.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f2f5f9",
+  "theme_color": "#123a63",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

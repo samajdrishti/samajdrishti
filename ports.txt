@@ -1,0 +1,13 @@
+  TCP    0.0.0.0:5000           0.0.0.0:0              LISTENING       22768
+  TCP    0.0.0.0:5174           0.0.0.0:0              LISTENING       25912
+  TCP    [::]:5000              [::]:0                 LISTENING       22768
+  TCP    [::]:5174              [::]:0                 LISTENING       25912
+  TCP    [::1]:5174             [::1]:50859            TIME_WAIT       0
+  TCP    [::1]:5174             [::1]:52344            TIME_WAIT       0
+  TCP    [::1]:5174             [::1]:55141            TIME_WAIT       0
+  TCP    [::1]:5174             [::1]:56811            TIME_WAIT       0
+  TCP    [::1]:5174             [::1]:58635            TIME_WAIT       0
+  TCP    [::1]:5174             [::1]:60924            ESTABLISHED     25912
+  TCP    [::1]:5174             [::1]:61760            TIME_WAIT       0
+  TCP    [::1]:51090            [::1]:5174             TIME_WAIT       0
+  TCP    [::1]:60924            [::1]:5174             ESTABLISHED     2112

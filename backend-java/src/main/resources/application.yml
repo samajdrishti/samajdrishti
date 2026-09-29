@@ -1,0 +1,52 @@
+server:
+  port: ${PORT:5000}
+  error:
+    include-message: always
+  tomcat:
+    max-swallow-size: -1
+
+spring:
+  application:
+    name: samaj-drishti-api
+  main:
+    banner-mode: off
+  jpa:
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+        format_sql: false
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 12MB
+  web:
+    resources:
+      add-mappings: true
+  mvc:
+    problemdetails:
+      enabled: false
+
+app:
+  jwt:
+    secret: ${JWT_SECRET:samajdrishti_secret}
+    ttl-days: ${JWT_TTL_DAYS:7}
+  ai-engine:
+    base-url: ${AI_ENGINE_URL:http://localhost:5001}
+    health-timeout-ms: ${AI_HEALTH_TIMEOUT_MS:3000}
+    default-timeout-ms: ${AI_TIMEOUT_MS:15000}
+  vc:
+    base-url: ${VC_BASE_URL:https://meet.jit.si}
+  uploads:
+    evidence-dir: ${EVIDENCE_DIR:uploads/evidence}
+  monitoring:
+    heartbeat-ms: ${MONITORING_HEARTBEAT_MS:5000}
+  realtime:
+    enabled: ${REALTIME_ENABLED:true}
+
+logging:
+  level:
+    root: INFO
+    in.gov.samajdrishti: INFO
+    org.hibernate.SQL: WARN

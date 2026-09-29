@@ -1,0 +1,15 @@
+node_modules/
+dist/
+target/
+uploads/
+.venv/
+__pycache__/
+*.pyc
+.history-memo/
+.playwright-mcp/
+*.log
+*.log.err
+.env
+.DS_Store
+.idea/
+.vscode/

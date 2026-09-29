@@ -1,0 +1,36 @@
+# Test profile: everything runs in-process against an in-memory H2 database with the
+# seeded demo dataset. No PostgreSQL, no AI engine, no network.
+spring:
+  main:
+    banner-mode: "off"
+  datasource:
+    url: jdbc:h2:mem:samajdrishti-test;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+app:
+  data-mode: memory
+  seed-enabled: true
+  jwt:
+    secret: test-secret
+    ttl-days: 1
+  ai-engine:
+    base-url: http://localhost:59999   # deliberately dead: the client must degrade
+  monitoring:
+    heartbeat-ms: 600000               # the tick is not what this suite is testing
+  realtime:
+    enabled: false
+
+logging:
+  level:
+    root: WARN
+    in.gov.samajdrishti: INFO
+    org.springframework.web: WARN

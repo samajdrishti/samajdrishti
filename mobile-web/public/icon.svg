@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="96" fill="#1e3a5f" />
+  <!-- Ashoka-chakra inspired eye: monitoring + transparency -->
+  <circle cx="256" cy="256" r="150" fill="none" stroke="#ffffff" stroke-width="18" />
+  <circle cx="256" cy="256" r="58" fill="#138808" />
+  <g stroke="#ffffff" stroke-width="14" stroke-linecap="round">
+    <path d="M256 96v46M256 370v46M96 256h46M370 256h46" />
+    <path d="M146 146l33 33M333 333l33 33M366 146l-33 33M179 333l-33 33" />
+  </g>
+  <rect x="196" y="404" width="120" height="26" rx="13" fill="#138808" />
+</svg>
