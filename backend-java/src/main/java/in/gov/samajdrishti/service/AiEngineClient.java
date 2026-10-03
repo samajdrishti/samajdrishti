@@ -32,23 +32,35 @@ public class AiEngineClient {
 
     private final AiEngineTransport transport;
     private final AppProperties.AiEngine settings;
-    private final TtlCache<Map<String, Object>> healthCache = new TtlCache<>(4);
-    private final TtlCache<List<Map<String, Object>>> riskCache = new TtlCache<>(16);
+    private final TtlCache<Map<String, Object>> healthCache;
+    private final TtlCache<List<Map<String, Object>>> riskCache;
 
     public AiEngineClient(AiEngineTransport transport, AppProperties.AiEngine settings) {
+        this(transport, settings, java.time.Clock.systemUTC());
+    }
+
+    public AiEngineClient(AiEngineTransport transport, AppProperties.AiEngine settings, java.time.Clock clock) {
         this.transport = transport;
         this.settings = settings;
+        this.healthCache = new TtlCache<>(4, clock);
+        this.riskCache = new TtlCache<>(16, clock);
     }
 
     public Map<String, Object> riskScore(Integer projectId, Map<String, Object> projectData) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("project_id", projectId);
-        body.putAll(projectData);
-        Map<String, Object> response = transport.post("/api/risk/score", body, settings.defaultTimeout());
-        if (response == null) {
+        if (projectData != null) {
+            body.putAll(projectData);
+        }
+        try {
+            Map<String, Object> response = transport.post("/api/risk/score", body, settings.defaultTimeout());
+            if (response == null) {
+                return Map.of("project_id", projectId, "risk_score", 50, "factors", List.of());
+            }
+            return response;
+        } catch (Exception e) {
             return Map.of("project_id", projectId, "risk_score", 50, "factors", List.of());
         }
-        return response;
     }
 
     /** Risk scores a whole portfolio in one round-trip; used by the dashboard and the assigner. */
@@ -56,19 +68,36 @@ public class AiEngineClient {
         if (projects == null || projects.isEmpty()) {
             return List.of();
         }
-        String key = String.valueOf(projects.hashCode()) + ':' + projects.size();
+        String key = buildBatchKey(projects);
         List<Map<String, Object>> cached = riskCache.get(key);
         if (cached != null) {
             return cached;
         }
 
-        Map<String, Object> response = transport.post("/api/risk/score-batch", Map.of("projects", projects));
-        if (response == null) {
+        try {
+            Map<String, Object> response = transport.post("/api/risk/score-batch", Map.of("projects", projects),
+                    settings.defaultTimeout());
+            if (response == null) {
+                return List.of();
+            }
+            List<Map<String, Object>> scores = asList(response.get("scores"));
+            riskCache.put(key, scores, RISK_CACHE);
+            return scores;
+        } catch (Exception e) {
             return List.of();
         }
-        List<Map<String, Object>> scores = asList(response.get("scores"));
-        riskCache.put(key, scores, RISK_CACHE);
-        return scores;
+    }
+
+    private static String buildBatchKey(List<Map<String, Object>> projects) {
+        StringBuilder sb = new StringBuilder(projects.size() * 16);
+        sb.append(projects.size()).append(':');
+        for (Map<String, Object> p : projects) {
+            if (p != null) {
+                sb.append(p.get("id")).append(':').append(p.get("budget")).append(';');
+            }
+        }
+        sb.append(projects.hashCode());
+        return sb.toString();
     }
 
     public Map<String, Object> health() {
@@ -97,8 +126,13 @@ public class AiEngineClient {
     }
 
     public List<Map<String, Object>> detectAnomalies(List<Map<String, Object>> inspections) {
-        Map<String, Object> response = transport.post("/api/anomaly/detect", Map.of("inspections", inspections));
-        return response == null ? List.of() : asList(response.get("anomalies"));
+        try {
+            Map<String, Object> response = transport.post("/api/anomaly/detect", Map.of("inspections", inspections),
+                    settings.defaultTimeout());
+            return response == null ? List.of() : asList(response.get("anomalies"));
+        } catch (Exception e) {
+            return List.of();
+        }
     }
 
     public List<Map<String, Object>> assignInspections(List<Map<String, Object>> projects,
@@ -108,23 +142,41 @@ public class AiEngineClient {
         body.put("projects", projects);
         body.put("officials", officials);
         body.put("num_inspections", numInspections);
-        Map<String, Object> response = transport.post("/api/inspections/random-assign", body,
-                settings.defaultTimeout());
-        return response == null ? List.of() : asList(response.get("assignments"));
+        try {
+            Map<String, Object> response = transport.post("/api/inspections/random-assign", body,
+                    settings.defaultTimeout());
+            return response == null ? List.of() : asList(response.get("assignments"));
+        } catch (Exception e) {
+            return List.of();
+        }
     }
 
     public Map<String, Object> dashboardStats(List<Map<String, Object>> projects) {
-        return transport.post("/api/dashboard/stats", Map.of("projects", projects));
+        try {
+            return transport.post("/api/dashboard/stats", Map.of("projects", projects), settings.defaultTimeout());
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     public List<Map<String, Object>> analyzeAttendance(List<Map<String, Object>> records) {
-        Map<String, Object> response = transport.post("/api/attendance/analyze", Map.of("records", records));
-        return response == null ? List.of() : asList(response.get("irregularities"));
+        try {
+            Map<String, Object> response = transport.post("/api/attendance/analyze", Map.of("records", records),
+                    settings.defaultTimeout());
+            return response == null ? List.of() : asList(response.get("irregularities"));
+        } catch (Exception e) {
+            return List.of();
+        }
     }
 
     public List<Map<String, Object>> detectSuspiciousPatterns(List<Map<String, Object>> patterns) {
-        Map<String, Object> response = transport.post("/api/patterns/suspicious", Map.of("patterns", patterns));
-        return response == null ? List.of() : asList(response.get("suspicious_patterns"));
+        try {
+            Map<String, Object> response = transport.post("/api/patterns/suspicious", Map.of("patterns", patterns),
+                    settings.defaultTimeout());
+            return response == null ? List.of() : asList(response.get("suspicious_patterns"));
+        } catch (Exception e) {
+            return List.of();
+        }
     }
 
     /**
@@ -135,7 +187,11 @@ public class AiEngineClient {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("project", project);
         body.put("observation", observation);
-        return transport.post("/api/geo/verify", body);
+        try {
+            return transport.post("/api/geo/verify", body, settings.defaultTimeout());
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /** LLM narrative (Groq when a key is configured, deterministic local text otherwise). */
@@ -146,7 +202,11 @@ public class AiEngineClient {
         // A reasoning model needs far longer than a normal call, so this one gets its own
         // budget; the caller-facing route is a dashboard read that may legitimately take
         // a few seconds.
-        return transport.post("/api/narrative", body, Duration.ofSeconds(45));
+        try {
+            return transport.post("/api/narrative", body, Duration.ofSeconds(45));
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     public static Map<String, Object> projectForGeo(Map<String, Object> project, GeoPoint coords) {
@@ -159,6 +219,11 @@ public class AiEngineClient {
         return payload;
     }
 
+    public void clearCaches() {
+        healthCache.clear();
+        riskCache.clear();
+    }
+
     /* ------------------------------------------------------------- transport */
 
     private static List<Map<String, Object>> asList(Object value) {
@@ -169,7 +234,7 @@ public class AiEngineClient {
                     typed.add(castMap(map));
                 }
             }
-            return typed;
+            return java.util.Collections.unmodifiableList(typed);
         }
         return List.of();
     }
