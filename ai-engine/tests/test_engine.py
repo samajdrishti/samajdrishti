@@ -121,6 +121,38 @@ def test_anomaly_detection_survives_a_malformed_batch(client: TestClient) -> Non
     assert response.status_code == 422
 
 
+def test_anomaly_detector_is_stable_across_repeated_calls() -> None:
+    """Refitting per call must stay deterministic - the same batch always
+    yields the same verdicts, whatever backend is active."""
+    import pandas as pd
+    from models.anomaly_detector import AnomalyDetector
+
+    detector = AnomalyDetector()
+    frame = pd.DataFrame(INSPECTION_BATCH)
+    first = detector.detect(frame)
+    second = detector.detect(frame)
+    assert first == second
+    assert [a["inspection_id"] for a in first] == [a["inspection_id"] for a in second]
+
+
+# --------------------------------------------------------------- configuration
+
+
+def test_cors_origins_default_to_the_local_frontends(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CORS_ORIGINS", raising=False)
+    assert main.cors_origins() == ["http://localhost:5173", "http://localhost:5174"]
+
+
+def test_cors_origins_are_read_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CORS_ORIGINS", "https://samajdrishti.gov.in, https://dashboard.gov.in")
+    assert main.cors_origins() == ["https://samajdrishti.gov.in", "https://dashboard.gov.in"]
+
+
+def test_cors_origins_tolerate_whitespace_and_blanks(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CORS_ORIGINS", " , https://one.gov.in , , https://two.gov.in , ")
+    assert main.cors_origins() == ["https://one.gov.in", "https://two.gov.in"]
+
+
 # ------------------------------------------------------------------ assignment
 
 

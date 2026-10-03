@@ -10,15 +10,13 @@ Smart India Hackathon 2026 | Problem Statement ID: 26095 | Theme: Smart Automati
 
 ```
 samaj-drishti/
-├── backend/          # Node.js + Express API server (port 5000)
+├── backend-java/     # Spring Boot API server (port 5000) — the shared backend
 ├── admin/            # Department dashboard (React + MUI, port 5173)
 ├── mobile-web/       # Field app - installable PWA for officials (port 5174)
-├── mobile/           # Legacy React Native app (needs Android SDK; PWA is the demo path)
 ├── ai-engine/        # Python ML + LLM engine (port 5001)
-├── backend-java/     # Spring Boot twin of the same API contract
-├── docs/             # API contract, as-built HLD/LLD, rendered diagrams
 ├── scripts/          # e2e-check.mjs (82 checks) + integrity-check.mjs (20 checks)
-└── logs/             # dev-server / build / test output (git-ignored, safe to delete)
+├── logs/             # dev-server / build / test output (git-ignored, safe to delete)
+└── docker-compose.yml, orchestrate.cmd, start-all.cmd, stop-all.cmd, pm2.config.js
 ```
 
 > The prototype plan (`prototype-plan.md`) and the classic architecture drawing
@@ -26,15 +24,26 @@ samaj-drishti/
 
 ## 🚀 Quick Start
 
-Four services. The API and the AI engine are independent — the dashboards stay
-usable (with reduced AI output) if the Python engine is offline.
+Two frontends, one shared backend. `admin/` (web dashboard, port 5173) and
+`mobile-web/` (mobile field PWA, port 5174) both call the same Spring Boot API
+(`backend-java/`, port 5000), which in turn calls the shared Python AI engine
+(`ai-engine/`, port 5001). The dashboards stay usable (with reduced AI output)
+if the Python engine is offline.
 
 | # | Service | Port | Command |
 |---|---------|------|---------|
-| 1 | API | 5000 | `cd backend && npm install && npm run dev` |
-| 2 | AI engine | 5001 | `cd ai-engine && .venv\Scripts\python.exe app.py` |
-| 3 | Department dashboard | 5173 | `cd admin && npm install && npm run dev` |
-| 4 | **Field app (PWA)** | 5174 | `cd mobile-web && npm install && npm run dev` |
+| 1 | Shared API (Spring Boot) | 5000 | `cd backend-java && mvn spring-boot:run` (or `java -jar target\samaj-drishti-api.jar`) |
+| 2 | AI engine (shared) | 5001 | `cd ai-engine && .venv\Scripts\python.exe -m uvicorn main:app --port 5001` |
+| 3 | Frontend 1 — Web dashboard | 5173 | `cd admin && npm install && npm run dev` |
+| 4 | Frontend 2 — Mobile field app (PWA) | 5174 | `cd mobile-web && npm install && npm run dev` |
+
+Both frontends resolve the backend URL at runtime from `/config.js`
+(`window.__APP_CONFIG__.API_URL`), falling back to the build-time `VITE_API_URL`
+(see `admin/.env.example` and `mobile-web/.env.example`, default
+`http://localhost:5000/api`). For phone testing on the same Wi-Fi, set the
+mobile app's `VITE_API_URL` to `http://<your-lan-ip>:5000/api`. In Docker, override
+without rebuilding: `API_URL=https://api.example.gov.in/api docker compose up --build`.
+Or run everything with `docker compose up --build`, or double-click `start-all.cmd`.
 
 Open <http://localhost:5174> on a phone (or the laptop) for the inspector app and
 <http://localhost:5173> for the department dashboard.
@@ -44,8 +53,7 @@ Open <http://localhost:5174> on a phone (or the laptop) for the inspector app an
 No Android SDK is available on this machine, so the field app is shipped as
 an **installable PWA**: "Add to Home Screen" gives a full-screen, offline-capable
 app on Android and iOS, and it runs unchanged in a desktop browser. `mobile-web/`
-uses the same API, geo-fencing and offline queue as the React Native app in
-`mobile/`, which is kept for teams that do have a mobile toolchain. (A JDK 17 +
+uses the same API, geo-fencing and offline queue. (A JDK 17 +
 Maven are installed as of this writing, which is why `backend-java/` can now be
 compiled and tested here — only the Android SDK is still missing.)
 
@@ -68,7 +76,7 @@ database.
 ```bash
 cd ai-engine
 python -m venv .venv && .venv\Scripts\python.exe -m pip install -r requirements.txt
-.venv\Scripts\python.exe app.py
+.venv\Scripts\python.exe -m uvicorn main:app --host 0.0.0.0 --port 5001
 ```
 
 * **Anomaly detection** prefers Isolation Forest (scikit-learn). Where an
@@ -118,10 +126,18 @@ DB_PASSWORD=postgres
 DB_PORT=5432
 JWT_SECRET=your_jwt_secret
 AI_ENGINE_URL=http://localhost:5001
+# Seed the well-known demo logins (admin@…/Admin@123). OFF by default in
+# docker-compose — never leave it on in a deployment others can reach.
+SEED_DEMO_DATA=false
 ```
 
 `DB_MODE=postgres` turns the demo fallback into a hard requirement — the API
 refuses to start if the database is down, which is what you want in deployment.
+
+> **Security note:** when seeding is enabled the demo users get well-known
+> passwords (`Admin@123`, `Super@123`, `Official@123`). Keep
+> `SEED_DEMO_DATA=false` (the compose default) anywhere the stack is
+> reachable beyond your machine, and rotate `JWT_SECRET` before any real use.
 
 
 ## 📡 API Endpoints
@@ -234,7 +250,9 @@ refuses to start if the database is down, which is what you want in deployment.
 
 ## 🔌 Key Features
 
-- ✅ Offline-first design (works without internet)
+- ✅ Offline-first design (works without internet; queued uploads replay
+  idempotently via a client-generated `client_id`, so a retried sync never
+  duplicates evidence)
 - ✅ Geo-tagged evidence capture
 - ✅ Tamper-evident evidence vault (SHA-256 chain, re-hashed on sign-off — `node scripts/integrity-check.mjs`)
 - ✅ Role-based authentication
@@ -257,14 +275,15 @@ Mobile App ↔ Backend API (port 5000)
 ## 🔧 Development
 
 ```bash
-# Backend
-cd backend && npm run dev
+# Backend (Spring Boot API)
+cd backend-java && mvn spring-boot:run
 
 # AI Engine
-cd ai-engine && python app.py
+cd ai-engine && .venv\Scripts\python.exe -m uvicorn main:app --port 5001
 
-# Mobile
-cd mobile && npx react-native start
+# Dashboards
+cd admin && npm run dev        # department dashboard :5173
+cd mobile-web && npm run dev   # field PWA :5174
 ```
 
 ## 🧪 Prototype Build Notes
@@ -274,6 +293,11 @@ admin dashboard served on port 5173, mobile upload contract exercised with
 `curl` against the live API.
 
 ### Fixed to make the prototype run
+
+> Historical log from the original Node.js/Express backend era — the backend
+> has since been rewritten as Spring Boot (`backend-java/`) with the same API
+> contract, so rows mentioning `express-validator`/`multer` describe the
+> legacy stack.
 
 | Area | Problem | Fix |
 |------|---------|-----|
@@ -313,9 +337,9 @@ admin dashboard served on port 5173, mobile upload contract exercised with
 
 ### Not verified on this machine
 
-* **React Native app** (`mobile/`) is legacy and was not compiled — no Android
-  SDK or JDK is installed. Its source was syntax-validated with esbuild and its
-  upload contract exercised against the live API. Use `mobile-web/` for demos.
+* **React Native app** — no separate RN source tree ships in this checkout
+  (it predates the PWA); no Android SDK is installed either way.
+  Use `mobile-web/` for demos.
 * **PostgreSQL path** — no server available, so the API ran on the in-memory
   driver. Set `DB_MODE=postgres` once a database is available; the same
   controllers and queries are used either way.
@@ -329,13 +353,12 @@ admin dashboard served on port 5173, mobile upload contract exercised with
 ## 📄 References
 
 ### Design documents
-- [As-Built HLD & LLD](docs/HLD-LLD.md) - architecture, data flows, component inventory, runtime
-  topology, the honest blueprint-vs-as-built gap map, the 7-minute demo script and the scale roadmap.
-  Every diagram is Mermaid - paste a block into <https://mermaid.live> and export SVG for slides.
-- [API contract v2](docs/API-CONTRACT.md) - every endpoint, the Socket.IO event table, error shapes
-- [Architecture diagrams](docs/diagrams.html) - the five diagrams of this document rendered (open in a
-  browser, then *Print / Save as PDF* for slides)
-- [Prototype plan](prototype-plan.md) - phase plan and success criteria
+- [Prototype plan](../prototype-plan.md) - phase plan and success criteria
+- [Architecture diagram](../architecture-diagram.html) - the classic component drawing (open in a browser, then *Print / Save as PDF* for slides)
+
+> The as-built HLD/LLD, API contract v2 and rendered diagram set referenced in
+> earlier drafts of this README are not in the repository; the endpoint table
+> above and the Problem Statement 26095 coverage matrix are the living contract.
 
 ### External
 - [DoSJE Official Site](https://www.dosje.gov.in/)

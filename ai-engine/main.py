@@ -23,9 +23,10 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pandas as pd
-from fastapi import FastAPI, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -43,6 +44,33 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
 )
 log = logging.getLogger("ai-engine")
+
+# Shared secret with the Java API. Auth is only enforced when the key is set, so
+# a local dev run with no AI_ENGINE_API_KEY keeps working unchanged.
+API_KEY = os.environ.get("AI_ENGINE_API_KEY", "")
+
+# Root that evidence images may be read from. verify-image must never resolve
+# paths outside this directory.
+UPLOAD_ROOT = Path(
+    os.environ.get(
+        "AI_UPLOAD_ROOT",
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads"),
+    )
+).resolve()
+
+
+# CORS origins are deployment-specific, so they come from the environment
+# (comma-separated) with the two local dev frontends as the default.
+def cors_origins() -> list[str]:
+    raw = os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://localhost:5174")
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
+async def require_api_key(request: Request) -> None:
+    if not API_KEY:
+        return
+    if request.headers.get("X-API-Key", "") != API_KEY:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
 
 MODELS = [
     "isolation_forest_anomaly_detector",
@@ -101,7 +129,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins(),
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -146,7 +174,8 @@ async def health() -> dict[str, object]:
 # -------------------------------------------------------------------- analysis
 
 
-@app.post("/api/anomaly/detect", response_model=schemas.AnomalyResponse, tags=["analysis"])
+@app.post("/api/anomaly/detect", response_model=schemas.AnomalyResponse, tags=["analysis"],
+          dependencies=[Depends(require_api_key)])
 async def detect_anomalies(body: schemas.AnomalyRequest) -> dict[str, object]:
     """Detect anomalies in inspection patterns.
 
@@ -169,7 +198,8 @@ async def detect_anomalies(body: schemas.AnomalyRequest) -> dict[str, object]:
     return {"anomalies": anomalies}
 
 
-@app.post("/api/risk/score", response_model=schemas.RiskScoreResponse, tags=["analysis"])
+@app.post("/api/risk/score", response_model=schemas.RiskScoreResponse, tags=["analysis"],
+          dependencies=[Depends(require_api_key)])
 async def calculate_risk_score(body: schemas.RiskScoreRequest) -> dict[str, object]:
     """AI risk score (0-100) for a single project."""
     project_data = {
@@ -186,7 +216,8 @@ async def calculate_risk_score(body: schemas.RiskScoreRequest) -> dict[str, obje
     }
 
 
-@app.post("/api/risk/score-batch", response_model=schemas.RiskBatchResponse, tags=["analysis"])
+@app.post("/api/risk/score-batch", response_model=schemas.RiskBatchResponse, tags=["analysis"],
+          dependencies=[Depends(require_api_key)])
 async def calculate_risk_scores_batch(body: schemas.RiskBatchRequest) -> dict[str, object]:
     """Risk score an entire portfolio in one round-trip."""
     scores = []
@@ -212,6 +243,7 @@ async def calculate_risk_scores_batch(body: schemas.RiskBatchRequest) -> dict[st
     "/api/inspections/random-assign",
     response_model=schemas.AssignmentResponse,
     tags=["analysis"],
+    dependencies=[Depends(require_api_key)],
 )
 async def assign_random_inspections(body: schemas.RandomAssignRequest) -> dict[str, object]:
     """Randomised, risk-weighted inspection assignment with zero-conflict scoring."""
@@ -226,25 +258,27 @@ async def assign_random_inspections(body: schemas.RandomAssignRequest) -> dict[s
     }
 
 
-@app.post("/api/attendance/analyze", tags=["analysis"])
+@app.post("/api/attendance/analyze", tags=["analysis"], dependencies=[Depends(require_api_key)])
 async def analyze_attendance(body: schemas.AttendanceRequest) -> dict[str, object]:
     """Detect attendance irregularities from real check-in/check-out punches."""
     return analyze_attendance_records(body.records)
 
 
-@app.post("/api/patterns/suspicious", tags=["analysis"])
+@app.post("/api/patterns/suspicious", tags=["analysis"], dependencies=[Depends(require_api_key)])
 async def detect_suspicious_patterns(body: schemas.PatternRequest) -> dict[str, object]:
     """Detect suspicious inspection patterns, such as a single inspector dominating."""
     return {"suspicious_patterns": risk_scorer.detect_pattern_anomalies(body.patterns)}
 
 
-@app.post("/api/geo/verify", response_model=schemas.GeoVerdict, tags=["analysis"])
+@app.post("/api/geo/verify", response_model=schemas.GeoVerdict, tags=["analysis"],
+          dependencies=[Depends(require_api_key)])
 async def verify_location(body: schemas.GeoVerifyRequest) -> dict[str, object]:
     """Decide whether a report was filed from the actual project site."""
     return verify_geo(body.project, body.observation)
 
 
-@app.post("/api/dashboard/stats", response_model=schemas.DashboardStats, tags=["analysis"])
+@app.post("/api/dashboard/stats", response_model=schemas.DashboardStats, tags=["analysis"],
+          dependencies=[Depends(require_api_key)])
 async def dashboard_stats(body: schemas.DashboardRequest) -> dict[str, object]:
     """Aggregate risk statistics for the admin dashboard."""
     return risk_scorer.generate_dashboard_stats(body.projects)
@@ -253,23 +287,30 @@ async def dashboard_stats(body: schemas.DashboardRequest) -> dict[str, object]:
 # --------------------------------------------------------------------- vision
 
 
-@app.post("/api/vision/verify-image", tags=["vision"])
+@app.post("/api/vision/verify-image", tags=["vision"], dependencies=[Depends(require_api_key)])
 async def verify_evidence_image(body: schemas.VisionVerifyRequest) -> dict[str, object]:
-    """EXIF and screen-capture tamper checks on an uploaded evidence photo."""
+    """EXIF and screen-capture tamper checks on an uploaded evidence photo.
+
+    The image must live inside UPLOAD_ROOT - absolute paths and traversal
+    (``..``) are rejected so the endpoint cannot be used to read arbitrary
+    files on the host.
+    """
     image_path = body.image_path or ""
-    if not os.path.isabs(image_path):
-        # Relative paths are resolved against the repository root, as before.
-        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        image_path = os.path.join(project_root, image_path.lstrip("/\\"))
+    if not image_path:
+        raise ValueError("image_path is required")
+    candidate = (UPLOAD_ROOT / image_path.lstrip("/\\")).resolve()
+    if not candidate.is_file() or UPLOAD_ROOT not in candidate.parents:
+        raise ValueError(f"image not found under the upload root: {image_path}")
     return image_verifier.verify_evidence(
-        img_path=image_path,
+        img_path=str(candidate),
         reported_lat=body.lat,
         reported_lng=body.lng,
         reported_timestamp=body.timestamp,
     )
 
 
-@app.post("/api/vision/cctv-anomaly", response_model=schemas.CctvAnomalyResponse, tags=["vision"])
+@app.post("/api/vision/cctv-anomaly", response_model=schemas.CctvAnomalyResponse, tags=["vision"],
+          dependencies=[Depends(require_api_key)])
 async def detect_cctv_anomaly(body: schemas.CctvAnomalyRequest) -> dict[str, object]:
     """CCTV obstruction and tamper detection: occlusion, blackout, glare, deflection."""
     is_obstructed = body.occlusion_pct > 60.0 or body.is_covered
@@ -306,6 +347,7 @@ async def detect_cctv_anomaly(body: schemas.CctvAnomalyRequest) -> dict[str, obj
     "/api/discrepancy/attendance-index",
     response_model=schemas.DiscrepancyResponse,
     tags=["analysis"],
+    dependencies=[Depends(require_api_key)],
 )
 async def attendance_discrepancy_index(body: schemas.DiscrepancyRequest) -> dict[str, object]:
     """Fuse AEBAS biometric punches, CCTV headcount and the sanctioned quota.
@@ -418,7 +460,8 @@ def _compact_context(context: dict) -> str:
     return "\n".join(lines)
 
 
-@app.post("/api/narrative", response_model=schemas.NarrativeResponse, tags=["narrative"])
+@app.post("/api/narrative", response_model=schemas.NarrativeResponse, tags=["narrative"],
+          dependencies=[Depends(require_api_key)])
 async def narrative(body: schemas.NarrativeRequest) -> dict[str, object]:
     """Executive briefing written by the LLM, with a deterministic local fallback.
 

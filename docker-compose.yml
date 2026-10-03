@@ -1,0 +1,79 @@
+services:
+  # Shared Spring Boot backend — serves BOTH frontends (web :5173 + mobile :5174)
+  # and proxies AI calls to ai-engine:5001 via AI_ENGINE_URL.
+  api:
+    build: ./backend-java
+    ports: ["5000:5000"]
+    environment:
+      # Secrets come from the environment or a .env file - never hardcoded here.
+      - JWT_SECRET=${JWT_SECRET:?set JWT_SECRET to a random 32+ char string}
+      - AI_ENGINE_URL=http://ai-engine:5001
+      - AI_ENGINE_API_KEY=${AI_ENGINE_API_KEY:?set AI_ENGINE_API_KEY to a random string}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173,http://localhost:5174}
+      # Google Maps browser key for the GIS page (served via /api/gis/centers, never bundled).
+      # Empty = OpenStreetMap fallback tiles.
+      - GOOGLE_MAP_API=${GOOGLE_MAP_API:-}
+      # Database: postgres is mandatory in this stack.
+      - DB_MODE=postgres
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${POSTGRES_DB:-samajdrishti}
+      - DB_USER=${POSTGRES_USER:-postgres}
+      - DB_PASSWORD=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      # Demo users (admin@samajdrishti.gov.in / Admin@123 etc.) are seeded
+      # ONLY when explicitly enabled. Default off: a deployed stack must not
+      # ship well-known credentials. CI opts in because its scripted logins
+      # need the demo users.
+      - SEED_DEMO_DATA=${SEED_DEMO_DATA:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+  ai-engine:
+    build: ./ai-engine
+    ports: ["5001:5001"]
+    environment:
+      - AI_ENGINE_API_KEY=${AI_ENGINE_API_KEY:?set AI_ENGINE_API_KEY to a random string}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+    restart: unless-stopped
+  # FRONTEND 1/2 — Web: department back-office dashboard (desktop, MUI)
+  admin:
+    build:
+      context: ./admin
+      args:
+        - VITE_API_URL=http://localhost:5000/api
+    ports: ["5173:80"]
+    # Runtime override — no rebuild needed to point at another API:
+    #   API_URL=https://api.example.gov.in/api docker compose up
+    environment:
+      - API_URL=${API_URL:-http://localhost:5000/api}
+    depends_on: [api]
+    restart: unless-stopped
+  # FRONTEND 2/2 — Mobile: field inspection PWA for officials (installable, offline-first)
+  mobile-web:
+    build:
+      context: ./mobile-web
+      args:
+        - VITE_API_URL=http://localhost:5000/api
+    ports: ["5174:80"]
+    environment:
+      - API_URL=${API_URL:-http://localhost:5000/api}
+    depends_on: [api]
+    restart: unless-stopped
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-samajdrishti}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    ports: ["5432:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+volumes:
+  pgdata: {}
