@@ -4,6 +4,8 @@
 
 Smart India Hackathon 2026 | Problem Statement ID: 26095 | Theme: Smart Automation
 
+🎬 Demo video: https://youtu.be/rRCLj-kzIcE · 💻 Repository: https://github.com/samajdrishti/samajdrishti.git
+
 ---
 
 ## 📁 Project Structure
