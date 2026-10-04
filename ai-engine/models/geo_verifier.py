@@ -11,7 +11,6 @@ import math
 EARTH_RADIUS_M = 6371000
 DEFAULT_RADIUS_M = 250
 
-
 def _to_float(value):
     try:
         if value is None or value == "":
@@ -22,7 +21,6 @@ def _to_float(value):
     if math.isnan(result) or math.isinf(result):
         return None
     return result
-
 
 def _coords(lat, lng):
     lat_value = _to_float(lat)
