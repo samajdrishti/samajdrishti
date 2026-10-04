@@ -67,6 +67,8 @@ services:
           property: password
       - key: SEED_DEMO_DATA
         value: "true"
+      - key: GOOGLE_MAP_API
+        value: ""
 
   # Python AI engine — internal traffic only (API reaches it at ai-engine:5001).
   - type: web
@@ -80,6 +82,8 @@ services:
       - fromGroup: samajdrishti-shared-secrets
       - key: PORT
         value: 5001
+      - key: GROQ_API_KEY
+        value: ""
 
   # FRONTEND 1/2 — Website: department back-office dashboard (desktop, MUI).
   - type: web
