@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { attendanceAPI, inspectionAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { formatCoords, getPosition } from '../services/geo';

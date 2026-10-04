@@ -2,6 +2,8 @@ package in.gov.samajdrishti.domain;
 
 import java.time.Instant;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Embedded;
 import jakarta.persistence.Entity;
@@ -85,6 +87,15 @@ public class Evidence {
     /** {@code pending}, {@code synced} or {@code failed}. */
     @Column(name = "sync_status", length = 20)
     private String syncStatus = "synced";
+
+    @Column(name = "previous_hash", length = 64)
+    private String previousHash;
+
+    @Column(name = "integrity_status", length = 30)
+    private String integrityStatus = "unverified";
+
+    @Column(name = "hash_verified")
+    private Boolean hashVerified;
 
     @Column(name = "verified", nullable = false)
     private boolean verified;
@@ -241,4 +252,39 @@ public class Evidence {
     public void setCreatedAt(Instant createdAt) {
         this.createdAt = createdAt;
     }
+
+    public String getPreviousHash() {
+        return previousHash;
+    }
+
+    public void setPreviousHash(String previousHash) {
+        this.previousHash = previousHash;
+    }
+
+    public String getIntegrityStatus() {
+        return integrityStatus != null ? integrityStatus : (verified ? "verified" : (fileHash != null ? "hashed" : "unverified"));
+    }
+
+    public void setIntegrityStatus(String integrityStatus) {
+        this.integrityStatus = integrityStatus;
+    }
+
+    public Boolean getHashVerified() {
+        return hashVerified;
+    }
+
+    public void setHashVerified(Boolean hashVerified) {
+        this.hashVerified = hashVerified;
+    }
+
+    @JsonProperty("sha256_hash")
+    public String getSha256Hash() {
+        return fileHash;
+    }
+
+    @JsonProperty("mime_type")
+    public String getMimeType() {
+        return contentType;
+    }
 }
+

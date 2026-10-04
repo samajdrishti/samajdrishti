@@ -43,17 +43,46 @@ public class JwtService {
 
     private final AppProperties.Jwt settings;
     private final SecretKey key;
+    private final org.springframework.core.env.Environment environment;
 
     private JwtEncoder encoder;
     private JwtDecoder decoder;
 
-    public JwtService(AppProperties properties) {
+    public JwtService(AppProperties properties, org.springframework.core.env.Environment environment) {
         this.settings = properties.jwt();
+        this.environment = environment;
         this.key = deriveKey(this.settings.secret());
     }
 
+    private static final String KNOWN_DEFAULT = "samajdrishti_secret";
+
     @PostConstruct
     void buildCodecs() {
+        String secret = settings.secret();
+        boolean weak = secret == null || secret.isBlank() || secret.equals(KNOWN_DEFAULT) || secret.length() < 32;
+        if (weak) {
+            boolean production = false;
+            if (environment != null) {
+                for (String profile : environment.getActiveProfiles()) {
+                    if (profile.equalsIgnoreCase("prod") || profile.equalsIgnoreCase("production")) {
+                        production = true;
+                    }
+                }
+                String appEnv = environment.getProperty("APP_ENV");
+                if (appEnv != null && (appEnv.equalsIgnoreCase("prod") || appEnv.equalsIgnoreCase("production"))) {
+                    production = true;
+                }
+                String prodFlag = environment.getProperty("PRODUCTION");
+                if ("1".equals(prodFlag) || "true".equalsIgnoreCase(prodFlag)) {
+                    production = true;
+                }
+            }
+            if (production) {
+                throw new IllegalStateException(
+                        "JWT_SECRET is unset, too short (<32 chars), or the well-known default. Refusing to start in production.");
+            }
+            System.out.println("[security] WARNING: JWT_SECRET is weak or default - do not deploy this configuration.");
+        }
         // The key must advertise HS256, otherwise the encoder's algorithm selector
         // cannot match it and signing fails with "Failed to select a JWK signing key".
         OctetSequenceKey jwk = new OctetSequenceKey.Builder(key)

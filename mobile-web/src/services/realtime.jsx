@@ -1,33 +1,44 @@
-import React, {
+import {
   createContext, useContext, useEffect, useMemo, useRef, useState,
 } from 'react';
 import { io } from 'socket.io-client';
-import { BACKEND_ORIGIN, getToken, getStoredUser } from './api';
+import { useAuth } from '../context/AuthContext';
+import { BACKEND_ORIGIN, clearSession } from './api';
 
 const RealtimeContext = createContext(null);
 
 /**
  * Single socket.io connection for the whole app. The JWT is sent in the handshake
- * so the server can join this user to their personal notification room.
+ * so the server can join this user to their personal notification room. The socket
+ * is rebuilt whenever the token changes, so logging in after mount (or logging out)
+ * connects/disconnects without a full reload.
  */
 export const RealtimeProvider = ({ children }) => {
+  const { token } = useAuth();
   const [connected, setConnected] = useState(false);
   const [events, setEvents] = useState([]);
   const [socket, setSocket] = useState(null);
 
   useEffect(() => {
-    const token = getToken();
-    if (!token) return undefined;
+    if (!token) {
+      setSocket(null);
+      setConnected(false);
+      return undefined;
+    }
 
     const client = io(BACKEND_ORIGIN, {
       transports: ['websocket', 'polling'],
       auth: { token },
     });
 
-    client.on('connect', () => {
-      setConnected(true);
-      const user = getStoredUser();
-      if (user && user.id) client.emit('join', user.id);
+    // The server derives the `user_<id>` room from this token and rejects the
+    // connection outright if it is missing or invalid, so there is nothing to
+    // send here - and a client-supplied room name would be ignored anyway.
+    client.on('connect', () => setConnected(true));
+    client.on('connect_error', (err) => {
+      setConnected(false);
+      // A rejected handshake means the token is no longer valid.
+      if (/unauthorized/i.test(err.message || '')) clearSession();
     });
     client.on('disconnect', () => setConnected(false));
 
@@ -47,7 +58,7 @@ export const RealtimeProvider = ({ children }) => {
       client.removeAllListeners();
       client.close();
     };
-  }, []);
+  }, [token]);
 
   const value = useMemo(
     () => ({ connected, events, socket, clearEvents: () => setEvents([]) }),
@@ -66,8 +77,11 @@ export const useRealtime = () => {
 /** Subscribe to the newest realtime event of a given type. */
 export const useRealtimeEvent = (type, handler) => {
   const { events } = useRealtime();
-  const handlerRef = useRef(handler);
-  handlerRef.current = handler;
+  const handlerRef = useRef(null);
+
+  useEffect(() => {
+    handlerRef.current = handler;
+  }, [handler]);
 
   const latest = useMemo(() => events.find((e) => e.type === type), [events, type]);
 

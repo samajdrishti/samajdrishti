@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useInspection, VC_QUESTIONS } from '../context/InspectionContext';
 import { TopBar, Panel, Note, Chip, KV } from '../components/ui';
@@ -41,14 +41,15 @@ const VideoCheck = () => {
 
   const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
   const ss = String(elapsed % 60).padStart(2, '0');
-  const asked = vc.questions[vc.questions.length - 1] || null;
   const nextQuestion = VC_QUESTIONS[vc.askCount % VC_QUESTIONS.length];
 
-  const participants = [
-    { name: 'S. Kumar', role: 'Field Officer (you)', self: true },
-    { name: 'R. Meenakshi', role: 'Project Incharge' },
-    { name: 'K. Anitha', role: 'Counsellor / Staff' },
-  ];
+  const participants = vc.participants.length
+    ? vc.participants
+    : [
+      { name: 'S. Kumar', role: 'Field Officer (you)', self: true },
+      { name: 'R. Meenakshi', role: 'Project Incharge' },
+      { name: 'K. Anitha', role: 'Counsellor / Staff' },
+    ];
 
   return (
     <>
@@ -79,21 +80,20 @@ const VideoCheck = () => {
         </div>
 
         <div className="g-vc-thumbs">
-          {participants.map((p, i) => (
-            <div key={p.name} className={`g-vc-thumb ${active && !p.self && speakerIdx === i - 1 ? 'speaking' : ''}`}>
-              {p.self ? (
-                <div className="g-vc-thumb-av">{camOff ? '🙈' : 'SK'}</div>
-              ) : (
-                <div className="g-vc-thumb-av" style={{ background: '#31496b' }}>
-                  {i === 1 ? 'RM' : 'KA'}
+          {participants.map((p, i) => {
+            const mono = p.self ? (camOff ? '🙈' : 'SK') : p.name.replace(/[^A-Z]/g, '').slice(0, 2).toUpperCase() || '•';
+            return (
+              <div key={p.name} className={`g-vc-thumb ${active && !p.self && speakerIdx === i - 1 ? 'speaking' : ''}`}>
+                <div className="g-vc-thumb-av" style={p.self ? undefined : { background: '#31496b' }}>
+                  {mono}
                 </div>
-              )}
-              <div className="g-vc-thumb-n">{p.name}</div>
-              <div className="tiny" style={{ color: '#7d8ea3', fontSize: 8.5 }}>
-                {active && !p.self && speakerIdx === i - 1 ? 'speaking' : p.role}
+                <div className="g-vc-thumb-n">{p.name}</div>
+                <div className="tiny" style={{ color: '#7d8ea3', fontSize: 8.5 }}>
+                  {active && !p.self && speakerIdx === i - 1 ? 'speaking' : p.role}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <div className="g-vc-ctrl">

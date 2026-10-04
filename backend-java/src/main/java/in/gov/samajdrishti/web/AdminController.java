@@ -171,12 +171,17 @@ public class AdminController {
         for (Inspection inspection : inspections.findAllByOrderByCreatedAtDesc().stream().limit(100).toList()) {
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("id", inspection.getId());
+            row.put("inspection_id", inspection.getId());
             row.put("project_id", inspection.getProjectId());
             row.put("assigned_to", inspection.getAssignedTo());
             row.put("status", inspection.getStatus());
             row.put("scheduled_date", inspection.getScheduledDate());
             row.put("completed_date", inspection.getCompletedDate());
             row.put("ai_risk_score", inspection.getAiRiskScore());
+            row.put("gps_verified", inspection.isGpsVerified());
+            row.put("gps_distance_meters", inspection.getGpsDistanceMeters());
+            row.put("gps_verdict", inspection.getGpsVerdict());
+            row.put("inspection_type", inspection.getInspectionType());
             batch.add(row);
         }
         return Map.of("anomalies", ai.detectAnomalies(batch));

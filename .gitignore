@@ -7,8 +7,10 @@ __pycache__/
 *.pyc
 .history-memo/
 .playwright-mcp/
+logs/
 *.log
 *.log.err
+*.err
 .env
 .DS_Store
 .idea/

@@ -1,0 +1,20 @@
+# Java Backend
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.log
+*.tmp
+node_modules/
+.git/
+.gradle/
+build/
+out/
+.cxx/
+.classpath
+.project
+.settings/
+**/.mvn
+!**/src/main/**
+!**/src/test/**

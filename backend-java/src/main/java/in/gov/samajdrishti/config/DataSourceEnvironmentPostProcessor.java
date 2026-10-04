@@ -56,8 +56,14 @@ public class DataSourceEnvironmentPostProcessor implements EnvironmentPostProces
                             read(environment, dotenv, "app.db.host", "DB_HOST", "localhost"),
                             read(environment, dotenv, "app.db.port", "DB_PORT", "5432"),
                             read(environment, dotenv, "app.db.name", "DB_NAME", "samajdrishti")));
-            String user = read(environment, dotenv, "app.db.username", "DB_USER", "postgres");
-            String password = read(environment, dotenv, "app.db.password", "DB_PASSWORD", "postgres");
+            String user = read(environment, dotenv, "app.db.username", "DB_USER", null);
+            String password = read(environment, dotenv, "app.db.password", "DB_PASSWORD", null);
+            if ((user == null || password == null) && isProduction(environment)) {
+                throw new IllegalStateException(
+                        "DB_USER and DB_PASSWORD must be set explicitly in production - no default credentials are accepted.");
+            }
+            user = user == null ? "postgres" : user;
+            password = password == null ? "postgres" : password;
 
             try {
                 verifyPostgres(url, user, password);
@@ -86,6 +92,29 @@ public class DataSourceEnvironmentPostProcessor implements EnvironmentPostProces
         }
 
         environment.getPropertySources().addFirst(new MapPropertySource(PROPERTY_SOURCE_NAME, overrides));
+    }
+
+    private static boolean isProduction(ConfigurableEnvironment environment) {
+        for (String profile : environment.getActiveProfiles()) {
+            if (profile.equalsIgnoreCase("prod") || profile.equalsIgnoreCase("production")) {
+                return true;
+            }
+        }
+        String appEnv = System.getenv("APP_ENV");
+        if (appEnv == null) {
+            appEnv = System.getProperty("APP_ENV");
+        }
+        if (appEnv == null) {
+            appEnv = environment.getProperty("APP_ENV");
+        }
+        if (appEnv != null && (appEnv.equalsIgnoreCase("prod") || appEnv.equalsIgnoreCase("production"))) {
+            return true;
+        }
+        String prodFlag = System.getenv("PRODUCTION");
+        if (prodFlag == null) {
+            prodFlag = environment.getProperty("PRODUCTION");
+        }
+        return "1".equals(prodFlag) || "true".equalsIgnoreCase(prodFlag);
     }
 
     private static Map<String, Object> memoryOverrides() {

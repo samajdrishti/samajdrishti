@@ -27,6 +27,15 @@ final class Json {
         }
     }
 
+    @SuppressWarnings("unchecked")
+    static java.util.Map<String, Object> decodeMap(String json) {
+        try {
+            return MAPPER.readValue(json, java.util.Map.class);
+        } catch (JsonProcessingException | RuntimeException e) {
+            return java.util.Map.of();
+        }
+    }
+
     static String stringOf(Object value) {
         return value == null ? null : String.valueOf(value);
     }

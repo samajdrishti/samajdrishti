@@ -20,12 +20,6 @@ Pillow>=10.0.0
 # missing DLLs degrade gracefully instead of breaking the engine.
 opencv-python-headless>=4.9.0
 
-# Legacy Flask twin (ai-engine/app.py) - start-all.cmd still launches this file.
-# main.py (FastAPI) is the tested entrypoint; remove this block when you stop
-# launching app.py.
-flask>=3.0
-flask-cors>=4.0
-
 # Optional: PostgreSQL access for offline feature loading
 psycopg2-binary>=2.9.0
 

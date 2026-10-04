@@ -47,8 +47,11 @@ jobs:
       - name: Install dependencies
         run: pip install -r ai-engine/requirements.txt
 
+      # Must run from ai-engine/: `import main` in the test module relies on the
+      # working directory being on sys.path.
       - name: pytest
-        run: python -m pytest ai-engine/tests -q
+        working-directory: ai-engine
+        run: python -m pytest tests -q
 
   frontends-build:
     name: Frontend production builds

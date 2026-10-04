@@ -1,61 +1,94 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ALERTS, ALERT_FILTERS } from '../data/alerts';
-import { SectionTitle, Panel, FilterRow, Chip, Empty, Kpis } from '../components/ui';
+import { notificationAPI } from '../services/api';
+import { SectionTitle, Panel, Chip, Empty } from '../components/ui';
+
+const SEVERITY_BY_TYPE = {
+  alert: 'high',
+  anomaly: 'high',
+  assignment: 'medium',
+  info: 'medium',
+};
+
+const timeAgo = (iso) => {
+  if (!iso) return '';
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return '';
+  const mins = Math.max(0, Math.round((Date.now() - then) / 60000));
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+};
 
 const Alerts = () => {
   const navigate = useNavigate();
-  const [filter, setFilter] = React.useState('All');
+  const [items, setItems] = React.useState(null);
+  const [error, setError] = React.useState('');
 
-  const rows = ALERTS.filter((a) => (filter === 'All' ? true : a.severity === filter.toLowerCase()));
+  const load = React.useCallback(() => {
+    notificationAPI.list()
+      .then(({ data }) => setItems(Array.isArray(data) ? data : []))
+      .catch((err) => setError(err?.response?.data?.message || 'Could not load notifications'));
+  }, []);
+
+  React.useEffect(() => { load(); }, [load]);
+
+  const open = (n) => {
+    if (n.reference_type === 'inspection' && n.reference_id) {
+      navigate(`/inspections/${n.reference_id}`);
+    } else if (n.reference_type === 'atr' && n.reference_id) {
+      navigate(`/inspections?atr=${n.reference_id}`);
+    }
+    if (!n.is_read) {
+      notificationAPI.markRead(n.id).catch(() => {});
+      setItems((current) => current.map((c) => (c.id === n.id ? { ...c, is_read: true } : c)));
+    }
+  };
+
+  const unread = items ? items.filter((n) => !n.is_read).length : 0;
 
   return (
     <>
-      <SectionTitle aside={`${ALERTS.length} open`}>Alert centre</SectionTitle>
-
-      <Kpis
-        items={[
-          { label: 'Critical', value: ALERTS.filter((a) => a.severity === 'critical').length, tone: 'bad' },
-          { label: 'High', value: ALERTS.filter((a) => a.severity === 'high').length, tone: 'bad' },
-          { label: 'Medium', value: ALERTS.filter((a) => a.severity === 'medium').length, tone: 'warn' },
-        ]}
-      />
-
-      <FilterRow options={ALERT_FILTERS} value={filter} onChange={setFilter} />
+      <SectionTitle aside={items ? `${unread} unread` : '…'}>Alert centre</SectionTitle>
 
       <Panel pad={false}>
         <div className="g-panel-bd">
-          {rows.length === 0 ? (
-            <Empty icon="🔕" title="No alerts in this category" desc="Alerts are raised by the monitoring engine, by the AI engine and by the DoSJE desk." />
+          {items === null && !error ? (
+            <Empty icon="⏳" title="Loading alerts…" desc="" />
+          ) : error ? (
+            <Empty icon="⚠️" title="Alerts unavailable" desc={error} />
+          ) : items.length === 0 ? (
+            <Empty icon="🔕" title="No alerts yet" desc="Alerts are raised by the monitoring engine, by the AI engine and by the DoSJE desk." />
           ) : (
-            rows.map((a) => (
-              <div key={a.id} className="g-alert-row">
-                <div className={`g-alert-bar ${a.severity}`} />
-                <div className="grow">
-                  <div className="row" style={{ justifyContent: 'space-between', gap: 8 }}>
-                    <span className="g-alert-t">{a.title}</span>
-                    <span className="tiny muted" style={{ whiteSpace: 'nowrap' }}>{a.time}</span>
-                  </div>
-                  <div className="g-alert-m">{a.institution}</div>
-                  <div className="g-alert-m" style={{ marginTop: 3 }}>{a.body}</div>
-                  <div className="row" style={{ gap: 8, marginTop: 7 }}>
-                    <Chip tone={a.severity === 'critical' || a.severity === 'high' ? 'bad' : a.severity === 'medium' ? 'warn' : 'info'}>
-                      {a.severity}
-                    </Chip>
-                    {a.action ? (
-                      <button
-                        type="button"
-                        className="auth-link"
-                        style={{ fontSize: 11.5 }}
-                        onClick={() => a.target && navigate(a.target)}
-                      >
-                        {a.action} →
-                      </button>
-                    ) : null}
+            items.map((n) => {
+              const severity = SEVERITY_BY_TYPE[n.type] || 'medium';
+              const actionable = n.reference_type === 'inspection' || n.reference_type === 'atr';
+              return (
+                <div
+                  key={n.id}
+                  className="g-alert-row"
+                  style={n.is_read ? { opacity: 0.65 } : undefined}
+                  onClick={() => open(n)}
+                  role={actionable ? 'button' : undefined}
+                >
+                  <div className={`g-alert-bar ${severity}`} />
+                  <div className="grow">
+                    <div className="row" style={{ justifyContent: 'space-between', gap: 8 }}>
+                      <span className="g-alert-t">{n.title || 'Notification'}</span>
+                      <span className="tiny muted" style={{ whiteSpace: 'nowrap' }}>{timeAgo(n.created_at)}</span>
+                    </div>
+                    <div className="g-alert-m" style={{ marginTop: 3 }}>{n.message}</div>
+                    <div className="row" style={{ gap: 8, marginTop: 7 }}>
+                      <Chip tone={severity === 'high' ? 'bad' : 'warn'}>{severity}</Chip>
+                      {!n.is_read ? <Chip tone="info">unread</Chip> : null}
+                      {actionable ? <span className="auth-link" style={{ fontSize: 11.5 }}>Open →</span> : null}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </Panel>

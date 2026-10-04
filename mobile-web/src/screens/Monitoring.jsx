@@ -1,8 +1,8 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { monitoringAPI } from '../services/api';
 import { useRealtime } from '../services/realtime';
 
-const REFRESH_MS = 3000;
+const REFRESH_MS = 10000;
 
 const clock = () =>
   new Date().toLocaleTimeString('en-IN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });

@@ -13,14 +13,14 @@ echo   Samaj Drishti - Ministry of Social Justice ^& Empowerment
 echo  ==============================================================
 echo.
 
-where node >nul 2>&1
+where java >nul 2>&1
 if errorlevel 1 (
-  echo [ERROR] Node.js not found on PATH. Install Node 18+ and re-run.
+  echo [ERROR] Java not found on PATH. Install JDK 17+ and re-run.
   pause & exit /b 1
 )
 
-if not exist "%ROOT%backend\node_modules" (
-  echo [ERROR] Backend dependencies missing. Run:  cd backend ^& npm install
+if not exist "%ROOT%backend-java\target\samaj-drishti-api.jar" (
+  echo [ERROR] Backend JAR missing. Run:  cd backend-java ^& mvn package -DskipTests
   pause & exit /b 1
 )
 if not exist "%ROOT%admin\node_modules" (
@@ -40,10 +40,10 @@ if not exist "%ROOT%ai-engine\.venv\Scripts\python.exe" (
 )
 
 echo Starting API on port 5000 ...
-start "Samaj Drishti API (5000)" cmd /k "cd /d ""%ROOT%backend"" && node src\index.js"
+start "Samaj Drishti API (5000)" cmd /k "cd /d ""%ROOT%backend-java"" && java -jar target\samaj-drishti-api.jar"
 
 echo Starting AI engine on port 5001 ...
-start "Samaj Drishti AI Engine (5001)" cmd /k "cd /d ""%ROOT%ai-engine"" && .venv\Scripts\python.exe app.py"
+start "Samaj Drishti AI Engine (5001)" cmd /k "cd /d ""%ROOT%ai-engine"" && .venv\Scripts\python.exe -m uvicorn main:app --host 0.0.0.0 --port 5001"
 
 echo Starting department dashboard on port 5173 ...
 start "Samaj Drishti Dashboard (5173)" cmd /k "cd /d ""%ROOT%admin"" && npm run dev"

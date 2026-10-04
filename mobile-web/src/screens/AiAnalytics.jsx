@@ -1,4 +1,4 @@
-import React from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useInspection, ATTENDANCE } from '../context/InspectionContext';
 import { TopBar, Panel, Note, Chip, Bar, KV } from '../components/ui';
@@ -36,8 +36,18 @@ const Compare = () => {
 const AiAnalytics = () => {
   const { session, runAi, verifyAnomaly, setNotes } = useInspection();
   const navigate = useNavigate();
+  const [running, setRunning] = useState(false);
   const a = ATTENDANCE;
   const hasRun = session.ai.length > 0;
+
+  const onRun = async () => {
+    setRunning(true);
+    try {
+      await runAi();
+    } finally {
+      setRunning(false);
+    }
+  };
 
   return (
     <>
@@ -77,8 +87,8 @@ const AiAnalytics = () => {
         </Note>
 
         {!hasRun ? (
-          <button className="g-btn g-btn-primary" onClick={runAi}>
-            RUN AI ANOMALY ANALYSIS
+          <button className="g-btn g-btn-primary" onClick={onRun} disabled={running}>
+            {running ? <><span className="spinner" /> Querying central engine…</> : 'RUN AI ANOMALY ANALYSIS'}
           </button>
         ) : null}
 
@@ -144,10 +154,10 @@ const AiAnalytics = () => {
         ) : null}
 
         <Panel title="Detection basis">
+          <KV k="Engine" v={session.aiSource === 'server' ? 'Central anomaly engine · live' : 'Local engine · offline fallback'} />
           <KV k="Attendance source" v="Manual register photo EV-04" />
           <KV k="Headcount source" v="Live video check, 12:35–12:50" />
           <KV k="Comparison window" v="Last 4 monthly records" />
-          <KV k="Engine" v="AI Engine v1 · on-prem" />
         </Panel>
       </div>
     </>

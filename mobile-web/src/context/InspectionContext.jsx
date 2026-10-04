@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useEffect, useMemo, useState, useCallback } from 'react';
-import { inspectionAPI, evidenceAPI, reportAPI } from '../services/api';
+import { createContext, useContext, useEffect, useMemo, useState, useCallback, useRef } from 'react';
+import { inspectionAPI, evidenceAPI, reportAPI, anomalyAPI, getClientId } from '../services/api';
+import { queueEvidence, queueInspectionUpdate, flushQueue } from '../services/offlineQueue';
 
 /* ==========================================================================
    Inspection session state.
@@ -100,6 +101,32 @@ export const ATTENDANCE = {
   staffRostered: 5,
 };
 
+/* The register pool a random sample is drawn from on every run, so the
+   institution cannot pre-rehearse which beneficiaries will be checked. */
+const BENE_POOL = [
+  { tag: 'B-0412', name: 'Smt. Lakshmi', age: 41 },
+  { tag: 'B-0298', name: 'Mr. Ravi', age: 52 },
+  { tag: 'B-0561', name: 'Ms. Devi', age: 38 },
+  { tag: 'B-0177', name: 'Mr. Suresh', age: 58 },
+  { tag: 'B-0644', name: 'Smt. Kamala', age: 45 },
+];
+
+const STAFF_POOL = [
+  { name: 'K. Anitha', role: 'Counsellor / Staff' },
+  { name: 'M. Rajesh', role: 'Ward Helper' },
+  { name: 'P. Selvi', role: 'Kitchen Supervisor' },
+  { name: 'T. Vinod', role: 'Nurse' },
+];
+
+const pickRandom = (pool, count) => {
+  const copy = [...pool];
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy.slice(0, count);
+};
+
 const buildAnomalies = () => [
   {
     id: 'an.att',
@@ -153,6 +180,29 @@ const buildAnomalies = () => [
   },
 ];
 
+/**
+ * Maps the server's anomaly rows (snake_case, 0..1 confidence) onto the local
+ * shape the field screen renders (0..100 confidence, a severity the chip set
+ * knows). Falls back to the locally-built findings when the central engine has
+ * nothing on record for this inspection yet.
+ */
+const mapAnomalies = (serverRows, localRows) => {
+  if (Array.isArray(serverRows) && serverRows.length) {
+    return serverRows.map((row) => ({
+      id: `srv-${row.id}`,
+      type: row.type,
+      label: String(row.type || 'FINDING').replace(/_/g, ' '),
+      severity: row.severity === 'high' ? 'critical' : row.severity || 'medium',
+      confidence: Math.round(Number(row.confidence || 0.5) * 100),
+      detail: row.description || 'Raised by the central anomaly engine.',
+      evidenceRef: row.evidence_id ? `EVIDENCE #${row.evidence_id}` : row.detector || 'central engine',
+      verified: row.human_verified ? true : row.status === 'confirmed' ? true : row.status === 'dismissed' ? false : null,
+      source: row.source || 'ai',
+    }));
+  }
+  return localRows;
+};
+
 const INSTITUTION = {
   name: 'ABC Rehabilitation Centre',
   type: 'Rehabilitation Centre (NGO grant-aided)',
@@ -186,11 +236,23 @@ const freshSession = () => ({
   inspectionType: 'Surprise Inspection',
   distanceKm: 4.2,
   gps: null,
-  vc: { status: 'not_started', startedAt: null, endedAt: null, askCount: 0, questions: [], verified: 0, flagged: 0 },
+  vc: { status: 'not_started', startedAt: null, endedAt: null, askCount: 0, questions: [], verified: 0, flagged: 0, participants: [] },
   evidence: [],
   checklist: {},
+  beneficiary: {
+    status: 'not_started',
+    startedAt: null,
+    completedAt: null,
+    method: 'QR + Face + OTP',
+    selected: [],
+    verified: 0,
+    flagged: 0,
+    consent: false,
+    inchargeSign: null,
+  },
   notes: '',
   ai: [],
+  aiSource: null,
   attendance: ATTENDANCE,
   startedAt: null,
   submittedAt: null,
@@ -203,9 +265,46 @@ const load = () => {
     const raw = localStorage.getItem(SESSION_KEY);
     if (!raw) return freshSession();
     const parsed = JSON.parse(raw);
-    return { ...freshSession(), ...parsed, institution: INSTITUTION, officer: { ...freshSession().officer, ...parsed.officer } };
+    const base = freshSession();
+    return {
+      ...base,
+      ...parsed,
+      institution: base.institution,
+      officer: { ...base.officer, ...parsed.officer },
+      vc: { ...base.vc, ...parsed.vc },
+      beneficiary: { ...base.beneficiary, ...parsed.beneficiary },
+    };
   } catch (err) {
     return freshSession();
+  }
+};
+
+/**
+ * localStorage is ~5 MB and a single photo data-URL is ~200–600 KB, so the raw
+ * session (with embedded images) quickly exceeds quota and wipes persistence.
+ * Persist a metadata-only copy: evidence keeps everything except the image
+ * bytes, which live in memory for this tab session. Queue payloads already
+ * carry their own copy via the offline queue when needed.
+ */
+const persistSession = (session) => {
+  const slim = {
+    ...session,
+    evidence: (session.evidence || []).map((e) => {
+      if (!e.dataUrl || e.dataUrl.length < 1024) return e;
+      const meta = { ...e };
+      delete meta.dataUrl;
+      return { ...meta, hasImage: true };
+    }),
+  };
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(slim));
+  } catch (err) {
+    try {
+      const emergency = { ...slim, evidence: slim.evidence.slice(0, 10) };
+      localStorage.setItem(SESSION_KEY, JSON.stringify(emergency));
+    } catch (err2) {
+      /* persistence is best-effort; the in-memory session keeps working */
+    }
   }
 };
 
@@ -219,9 +318,13 @@ export const InspectionProvider = ({ children }) => {
   const [events, setEvents] = useState([]);
 
   const online = browserOnline && !simulatedOffline;
+  const onlineRef = useRef(online);
+  onlineRef.current = online;
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
 
   useEffect(() => {
-    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    persistSession(session);
   }, [session]);
 
   useEffect(() => {
@@ -238,8 +341,8 @@ export const InspectionProvider = ({ children }) => {
 
   const patch = useCallback((fn) => setSession((s) => {
     const next = fn(s);
-    return { ...next, syncState: online ? 'synced' : 'pending' };
-  }), [online]);
+    return { ...next, syncState: onlineRef.current ? 'synced' : 'pending' };
+  }), []);
 
   const logEvent = useCallback((title, tone = 'ok', meta = '') => {
     setEvents((e) => [{ id: `${Date.now()}-${title}`, title, tone, meta, at: nowIso() }, ...e].slice(0, 60));
@@ -250,7 +353,9 @@ export const InspectionProvider = ({ children }) => {
   const accept = () => {
     patch((s) => ({ ...s, status: 'accepted', acceptedAt: nowIso() }));
     logEvent('Inspection accepted by officer', 'info', 'ACCEPTED');
-    inspectionAPI.updateStatus(session.inspectionId, { status: 'accepted' }).catch(() => {});
+    inspectionAPI.updateStatus(sessionRef.current.inspectionId, { status: 'accepted' }).catch(() => {
+      queueInspectionUpdate(sessionRef.current.inspectionId, { status: 'accepted' });
+    });
   };
 
   const verifyGps = (reading) => {
@@ -260,17 +365,30 @@ export const InspectionProvider = ({ children }) => {
       gps: { ...reading, verified: reading.distanceM <= s.institution.geofenceM, verifiedAt: nowIso() },
     }));
     logEvent('GPS geofence verified', 'ok', `DISTANCE ${Math.round(reading.distanceM)} M`);
-    inspectionAPI.geoVerify(session.inspectionId, reading.lat, reading.lng).catch(() => {});
+    inspectionAPI.geoVerify(sessionRef.current.inspectionId, reading.lat, reading.lng).catch(() => {
+      queueInspectionUpdate(sessionRef.current.inspectionId, { status: 'gps_verified', lat: reading.lat, lng: reading.lng });
+    });
   };
 
   const startInspection = () => {
     patch((s) => ({ ...s, status: 'in_progress', startedAt: nowIso() }));
     logEvent('Inspection started', 'info', 'IN PROGRESS');
-    inspectionAPI.updateStatus(session.inspectionId, { status: 'in_progress' }).catch(() => {});
+    inspectionAPI.updateStatus(sessionRef.current.inspectionId, { status: 'in_progress' }).catch(() => {
+      queueInspectionUpdate(sessionRef.current.inspectionId, { status: 'in_progress' });
+    });
   };
 
   const startVc = () => {
-    patch((s) => ({ ...s, vc: { ...s.vc, status: 'active', startedAt: nowIso() } }));
+    patch((s) => {
+      const incharge = { name: s.institution.incharge, role: 'Project Incharge' };
+      const randomStaff = pickRandom(STAFF_POOL, 1);
+      const participants = [
+        { name: s.officer.name, role: 'Field Officer (you)', self: true },
+        incharge,
+        ...randomStaff.map((p) => ({ ...p })),
+      ];
+      return { ...s, vc: { ...s.vc, status: 'active', startedAt: nowIso(), participants } };
+    });
     logEvent('Random video check started', 'info', 'VC LIVE');
   };
 
@@ -294,33 +412,161 @@ export const InspectionProvider = ({ children }) => {
   };
 
   const answerQuestion = (id, verdict) => {
+    patch((s) => {
+      const questions = s.vc.questions.map((q) => (q.id === id ? { ...q, verdict, answeredAt: nowIso() } : q));
+      return {
+        ...s,
+        vc: {
+          ...s.vc,
+          questions,
+          verified: questions.filter((q) => q.verdict === 'verified').length,
+          flagged: questions.filter((q) => q.verdict === 'flagged').length,
+        },
+      };
+    });
+  };
+
+  /* ------------------------------------------------- beneficiary verification */
+
+  /**
+   * Opens the beneficiary-verification step and draws a fresh random sample of
+   * beneficiaries to check face-to-face / by QR. The sample is re-rolled on every
+   * start so the institution cannot know in advance who will be verified.
+   */
+  const startBeneficiary = () => {
+    patch((s) => {
+      const sample = pickRandom(BENE_POOL, 3);
+      return {
+        ...s,
+        beneficiary: {
+          ...s.beneficiary,
+          status: 'active',
+          startedAt: nowIso(),
+          selected: sample,
+        },
+      };
+    });
+    logEvent('Beneficiary verification started', 'info', `${3} RANDOM BENEFICIARIES DRAWN`);
+  };
+
+  const markBeneficiary = (tag, verdict) => {
+    patch((s) => {
+      const selected = s.beneficiary.selected.map((b) => (b.tag === tag ? { ...b, verdict } : b));
+      return {
+        ...s,
+        beneficiary: {
+          ...s.beneficiary,
+          selected,
+          verified: selected.filter((b) => b.verdict === 'verified').length,
+          flagged: selected.filter((b) => b.verdict === 'flagged').length,
+        },
+      };
+    });
+  };
+
+  const setBeneficiaryConsent = (granted) => {
+    patch((s) => ({ ...s, beneficiary: { ...s.beneficiary, consent: granted } }));
+  };
+
+  const signBeneficiary = (signedBy) => {
     patch((s) => ({
       ...s,
-      vc: {
-        ...s.vc,
-        questions: s.vc.questions.map((q) => (q.id === id ? { ...q, verdict, answeredAt: nowIso() } : q)),
-        verified: s.vc.questions.filter((q) => q.verdict === 'verified').length + (verdict === 'verified' ? 1 : 0),
-        flagged: s.vc.questions.filter((q) => q.verdict === 'flagged').length + (verdict === 'flagged' ? 1 : 0),
+      beneficiary: {
+        ...s.beneficiary,
+        inchargeSign: { by: signedBy, at: nowIso() },
+        status: 'completed',
+        completedAt: nowIso(),
       },
     }));
+    logEvent('Incharge e-signature recorded', 'ok', signedBy);
   };
 
   const addEvidence = (item) => {
-    patch((s) => ({ ...s, evidence: [item, ...s.evidence] }));
-    logEvent(`Evidence captured: ${item.label}`, 'ok', item.geoTag);
-    if (online) evidenceAPI.upload({ inspection_id: session.inspectionId, type: item.kind, geo_coords: { lat: item.lat, lng: item.lng }, timestamp: item.capturedAt }).catch(() => {});
+    const stamped = {
+      ...item,
+      id: item.id || `EV-${Date.now().toString(36).toUpperCase()}`,
+      client_id: item.client_id || `${getClientId()}-${Date.now()}`,
+      capturedAt: item.capturedAt || nowIso(),
+      synced: onlineRef.current,
+    };
+    patch((s) => ({ ...s, evidence: [stamped, ...s.evidence] }));
+    logEvent(`Evidence captured: ${stamped.label}`, 'ok', stamped.geoTag);
+    if (onlineRef.current) {
+      evidenceAPI.upload({
+        inspection_id: sessionRef.current?.inspectionId,
+        client_id: stamped.client_id,
+        type: stamped.kind,
+        geo_coords: { lat: stamped.lat, lng: stamped.lng },
+        timestamp: stamped.capturedAt,
+        file: stamped.dataUrl ? { uri: stamped.dataUrl, fileName: `${stamped.id}.jpg`, type: 'image/jpeg' } : undefined,
+      }).catch(() => {
+        queueEvidence({
+          _id: stamped.client_id,
+          client_id: stamped.client_id,
+          inspection_id: sessionRef.current?.inspectionId,
+          type: stamped.kind,
+        });
+        setSession((s) => ({
+          ...s,
+          evidence: s.evidence.map((e) => (e.client_id === stamped.client_id ? { ...e, synced: false } : e)),
+        }));
+      });
+    } else {
+      queueEvidence({
+        _id: stamped.client_id,
+        client_id: stamped.client_id,
+        inspection_id: session.inspectionId,
+        type: stamped.kind,
+      });
+    }
   };
 
   const setCheck = (itemId, value) => {
     patch((s) => ({ ...s, checklist: { ...s.checklist, [itemId]: value } }));
-    inspectionAPI.saveChecklist(session.inspectionId, { itemId, value }).catch(() => {});
+    inspectionAPI.saveChecklist(sessionRef.current.inspectionId, { itemId, value }).catch(() => {
+      queueInspectionUpdate(sessionRef.current.inspectionId, { checklist: { [itemId]: value } });
+    });
+  };
+
+  const removeEvidence = (id) => {
+    patch((s) => ({ ...s, evidence: s.evidence.filter((e) => e.id !== id && e.client_id !== id) }));
+    logEvent('Evidence removed', 'warn', String(id));
   };
 
   const setNotes = (text) => setSession((s) => ({ ...s, notes: text }));
 
-  const runAi = () => {
-    patch((s) => ({ ...s, ai: s.ai.length ? s.ai : buildAnomalies() }));
-    logEvent('AI-assisted anomaly analysis complete', 'warn', '5 INDICATORS · HUMAN REVIEW REQUIRED');
+  const runAi = async (force = false) => {
+    if (sessionRef.current.ai.length && !force) return { cached: true };
+    // Ask the central engine for findings it already raised on this inspection
+    // (it runs the detectors when an inspection completes). Officers can read
+    // their own findings; only the back office closes them out.
+    let source = 'local';
+    let serverAnomalies = null;
+    if (onlineRef.current) {
+      try {
+        const { data } = await anomalyAPI.forInspection(sessionRef.current.inspectionId);
+        if (Array.isArray(data.anomalies) && data.anomalies.length) {
+          serverAnomalies = data.anomalies;
+          source = 'server';
+        }
+      } catch (err) {
+        // Server unreachable or nothing raised yet - the local fallback keeps
+        // the demo moving, exactly as the LLD intends for a dead AI engine.
+        serverAnomalies = null;
+        source = 'local';
+      }
+    }
+    patch((s) => ({
+      ...s,
+      ai: mapAnomalies(serverAnomalies, buildAnomalies()),
+      aiSource: source,
+    }));
+    logEvent(
+      'AI-assisted anomaly analysis complete',
+      'warn',
+      source === 'server' ? 'FROM CENTRAL ENGINE · HUMAN REVIEW REQUIRED' : 'LOCAL ENGINE · HUMAN REVIEW REQUIRED'
+    );
+    return { cached: false, source };
   };
 
   const verifyAnomaly = (id, ok) => {
@@ -328,19 +574,46 @@ export const InspectionProvider = ({ children }) => {
   };
 
   const submit = async () => {
-    const reportId = `INS-2026-00${482 + session.evidence.length}`;
+    const d = new Date();
+    const stamp = `${String(d.getDate()).padStart(2, '0')}${String(d.getMonth() + 1).padStart(2, '0')}-${Date.now().toString(36).toUpperCase().slice(-4)}`;
+    const reportId = `RPT-${d.getFullYear()}-${stamp}`;
     patch((s) => ({ ...s, status: 'submitted', submittedAt: nowIso(), reportId }));
     logEvent('Inspection report submitted', 'ok', reportId);
-    try { await reportAPI.list({ inspection_id: session.inspectionId }); } catch (err) { /* offline-safe */ }
+    try {
+      await reportAPI.list({ inspection_id: sessionRef.current.inspectionId });
+    } catch (err) {
+      queueInspectionUpdate(sessionRef.current.inspectionId, { status: 'submitted', reportId });
+    }
+    return reportId;
   };
 
-  const syncNow = () => {
+  const syncNow = async () => {
+    if (syncing) return { skipped: true };
     setSyncing(true);
-    setTimeout(() => {
-      setSession((s) => ({ ...s, syncState: 'synced' }));
+    try {
+      const result = await flushQueue();
+      const drained = (result.evidence?.synced || 0) + (result.inspections?.synced || 0);
+      if (drained > 0) {
+        setSession((s) => ({
+          ...s,
+          syncState: 'synced',
+          evidence: s.evidence.map((e) => ({ ...e, synced: true })),
+        }));
+      } else {
+        setSession((s) => ({ ...s, syncState: onlineRef.current ? 'synced' : 'pending' }));
+      }
+      logEvent(
+        'Offline queue synchronised',
+        'ok',
+        `${result.evidence?.synced || 0} EVIDENCE · ${result.inspections?.synced || 0} UPDATES`
+      );
+      return result;
+    } catch (err) {
+      logEvent('Sync failed — will retry', 'warn', String(err?.message || err).slice(0, 80));
+      return { error: err };
+    } finally {
       setSyncing(false);
-      logEvent('Offline queue synchronised', 'ok', `${session.evidence.length} EVIDENCE ITEMS`);
-    }, 1400);
+    }
   };
 
   const resetDemo = () => {
@@ -352,22 +625,43 @@ export const InspectionProvider = ({ children }) => {
   /* ---------------------------------------------------------------- derived */
 
   const checklistDone = CHECKLIST_ITEMS.filter((i) => session.checklist[i.id]).length;
+  const checklistTotal = CHECKLIST_ITEMS.length;
   const criticalCount = session.ai.filter((a) => a.severity === 'critical').length;
   const pendingEvidence = session.evidence.filter((e) => !e.synced).length;
-  const evidenceMinutes = session.evidence.length;
+
+  /** 8 inspection steps → single % used by Home / run / summary bars. */
+  const overallPct = useMemo(() => {
+    const steps = [
+      Boolean(session.gps?.verified),
+      session.vc.status === 'ended' || session.vc.status === 'active',
+      session.beneficiary.status === 'completed' || session.beneficiary.status === 'active',
+      session.evidence.length > 0,
+      checklistDone > 0,
+      checklistDone === checklistTotal,
+      session.ai.length > 0,
+      session.status === 'submitted',
+    ];
+    return Math.round((steps.filter(Boolean).length / steps.length) * 100);
+  }, [session.gps, session.vc.status, session.beneficiary.status, session.evidence.length, checklistDone, checklistTotal, session.ai.length, session.status]);
 
   const durationMin = useMemo(() => {
     if (!session.startedAt) return 0;
     const end = session.submittedAt ? Date.parse(session.submittedAt) : Date.now();
     return Math.max(1, Math.round((end - Date.parse(session.startedAt)) / 60000));
-  }, [session.startedAt, session.submittedAt, session.status]);
+  }, [session.startedAt, session.submittedAt]);
 
+  // The transition helpers close over refs + stable callbacks only, so the
+  // value memo intentionally tracks data (session, online, …), not identity.
+  /* eslint-disable react-hooks/exhaustive-deps */
   const value = useMemo(() => ({
     session, setSession, online, browserOnline, simulatedOffline, setSimulatedOffline,
-    syncing, events, checklistDone, criticalCount, pendingEvidence, durationMin,
+    syncing, events, checklistDone, checklistTotal, criticalCount, pendingEvidence, durationMin,
+    overallPct,
     accept, verifyGps, startInspection, startVc, endVc, askQuestion, answerQuestion,
-    addEvidence, setCheck, setNotes, runAi, verifyAnomaly, submit, syncNow, resetDemo, logEvent,
-  }), [session, online, browserOnline, simulatedOffline, syncing, events, checklistDone, criticalCount, pendingEvidence, durationMin]);
+    startBeneficiary, markBeneficiary, setBeneficiaryConsent, signBeneficiary,
+    addEvidence, removeEvidence, setCheck, setNotes, runAi, verifyAnomaly, submit, syncNow, resetDemo, logEvent,
+  }), [session, online, browserOnline, simulatedOffline, syncing, events, checklistDone, checklistTotal, criticalCount, pendingEvidence, durationMin, overallPct]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   return <InspectionContext.Provider value={value}>{children}</InspectionContext.Provider>;
 };

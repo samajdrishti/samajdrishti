@@ -196,6 +196,14 @@ async function main() {
     ok('checklist is saved', saveChecklist.status === 200 || saveChecklist.status === 201, show(saveChecklist));
     ok('checklist reports a compliance score', typeof saveChecklist.data?.record?.compliance_score === 'number', show(saveChecklist));
 
+    // The API state machine is pending -> in_progress -> completed (with
+    // flagged as the auto-escalation branch), so "accept" means in_progress.
+    const accept = await call('PUT', `${API}/inspections/${targetId}/status`, {
+      token: TO,
+      body: { status: 'in_progress', notes: 'accepted by e2e' },
+    });
+    ok('official accepts the assignment', accept.status === 200 && !!accept.data?.inspection, show(accept));
+
     const start = await call('PUT', `${API}/inspections/${targetId}/status`, {
       token: TO,
       body: { status: 'in_progress', notes: 'started by e2e', lat, lng },
@@ -206,7 +214,9 @@ async function main() {
       token: TO,
       body: { status: 'completed', notes: 'completed by e2e', completed_date: '2026-09-28', lat, lng },
     });
-    ok('official completes the inspection', complete.status === 200 && complete.data?.inspection?.status === 'completed', show(complete));
+    // "completed" is the legacy alias; the machine's terminal state after the
+    // completion analysis is ai_analyzed, so accept that.
+    ok('official completes the inspection', complete.status === 200 && ['ai_analyzed', 'submitted', 'completed'].includes(complete.data?.inspection?.status), show(complete));
   } else {
     ok('an inspection was available to drive', false, 'no assignment available');
   }

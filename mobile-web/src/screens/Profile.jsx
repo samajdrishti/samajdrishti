@@ -1,12 +1,42 @@
-import React from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
+import { pushStatus, subscribePush, unsubscribePush } from '../services/push';
 import { useInspection } from '../context/InspectionContext';
 import { SectionTitle, Panel, KV, Chip, Note, Kpis } from '../components/ui';
 
 const Profile = () => {
   const { user, logout } = useAuth();
-  const { session, online, simulatedOffline, setSimulatedOffline, resetDemo, checklistDone, pendingEvidence } = useInspection();
+  const { t, lang, setLang, langs } = useLanguage();
+  const [push, setPush] = useState({ state: 'unknown', reason: '' });
+  const [pushBusy, setPushBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    pushStatus()
+      .then((s) => { if (!cancelled) setPush(s); })
+      .catch((err) => { if (!cancelled) setPush({ state: 'unsupported', reason: String(err?.message || err) }); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const togglePush = async () => {
+    setPushBusy(true);
+    try {
+      if (push.state === 'subscribed') {
+        await unsubscribePush();
+        setPush({ state: 'off', reason: 'Push alerts are off on this device.' });
+      } else {
+        await subscribePush();
+        setPush({ state: 'subscribed', reason: '' });
+      }
+    } catch (err) {
+      setPush((p) => ({ ...p, reason: err?.message || 'Could not change push setting.' }));
+    } finally {
+      setPushBusy(false);
+    }
+  };
+  const { session, online, simulatedOffline, setSimulatedOffline, resetDemo, checklistDone, checklistTotal, pendingEvidence } = useInspection();
   const navigate = useNavigate();
   const s = session;
   const o = user || s.officer;
@@ -40,6 +70,17 @@ const Profile = () => {
         <KV k="Role" v="PMU / Inspection Officer" />
       </Panel>
 
+      <SectionTitle>{t('profile.language')}</SectionTitle>
+      <Panel>
+        <div className="g-tabs" role="group" aria-label={t('profile.language')}>
+          {langs.map((l) => (
+            <button key={l.id} type="button" className={lang === l.id ? 'on' : ''} onClick={() => setLang(l.id)} aria-pressed={lang === l.id}>
+              {l.label}
+            </button>
+          ))}
+        </div>
+      </Panel>
+
       <SectionTitle>Performance</SectionTitle>
       <Kpis
         items={[
@@ -59,8 +100,24 @@ const Profile = () => {
         <KV k="Location services" v={<Chip tone="ok" dot>HIGH ACCURACY</Chip>} />
       </Panel>
 
-      <SectionTitle>Offline storage</SectionTitle>
+      <SectionTitle>Notifications</SectionTitle>
       <Panel>
+        <KV k="Push alerts" v={<Chip tone={push.state === 'subscribed' ? 'ok' : 'mute'} dot>{push.state === 'subscribed' ? 'ON' : push.state.toUpperCase()}</Chip>} />
+        {push.reason ? <div className="tiny muted" style={{ margin: '6px 0' }}>{push.reason}</div> : null}
+        <div className="tiny muted" style={{ marginBottom: 8 }}>
+          New assignments and critical alerts even with the app closed. In-app alerts already arrive live over the realtime channel.
+        </div>
+        <button
+          type="button"
+          className={`g-btn ${push.state === 'subscribed' ? 'g-btn-quiet' : 'g-btn-primary'} g-btn-sm`}
+          onClick={togglePush}
+          disabled={pushBusy || push.state === 'unsupported' || push.state === 'blocked' || push.state === 'unknown'}
+        >
+          {pushBusy ? 'WORKING…' : push.state === 'subscribed' ? 'TURN OFF PUSH' : 'TURN ON PUSH'}
+        </button>
+      </Panel>
+
+      <SectionTitle>Offline storage</SectionTitle>      <Panel>
         <KV k="Local store" v="Encrypted (AES-256)" />
         <KV k="Inspections stored" v={3} />
         <KV k="Evidence queued" v={pendingEvidence} />
@@ -83,14 +140,14 @@ const Profile = () => {
         <KV k="Inspection" v={s.inspectionId} mono />
         <KV k="Institution" v={s.institution.name} />
         <KV k="Status" v={<Chip tone={s.status === 'submitted' ? 'ok' : s.status === 'assigned' ? 'warn' : 'info'} dot>{s.status.replace(/_/g, ' ')}</Chip>} />
-        <KV k="Checklist" v={`${checklistDone} / 24`} />
+        <KV k="Checklist" v={`${checklistDone} / ${checklistTotal}`} />
         <button className="g-btn g-btn-quiet g-btn-sm mt" onClick={() => navigate('/inspection/run')}>
           {s.status === 'submitted' ? 'View report' : 'Resume inspection'}
         </button>
       </Panel>
 
       <Note tone="mute" icon="i">
-        DoSJE SmartInspect · Ministry of Social Justice &amp; Empowerment
+        Samaj Drishti · Ministry of Social Justice &amp; Empowerment
         <br />
         SIH 2026 · PS 26095 · v1.0 prototype
       </Note>

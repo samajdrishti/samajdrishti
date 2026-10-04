@@ -1,21 +1,15 @@
-import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 import { useInspection } from '../context/InspectionContext';
 import { Panel, SectionTitle, Kpis, StatusChip, Chip, Note, Bar, KV } from '../components/ui';
 
 const LIVE = { cctvOnline: 18, cctvOffline: 3, anomalies: 5 };
 
-const greeting = () => {
-  const h = new Date().getHours();
-  if (h < 12) return 'Good morning';
-  if (h < 17) return 'Good afternoon';
-  return 'Good evening';
-};
-
 const Home = () => {
   const { user } = useAuth();
-  const { session, online, checklistDone, criticalCount, pendingEvidence } = useInspection();
+  const { t } = useLanguage();
+  const { session, online, checklistDone, checklistTotal, criticalCount, pendingEvidence, overallPct } = useInspection();
   const navigate = useNavigate();
 
   const assigned = 4;
@@ -28,29 +22,29 @@ const Home = () => {
   return (
     <>
       <Panel
-        title="Today"
+        title={t('home.today')}
         aside={<span className="g-sec-aside">{new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span>}
       >
         <Kpis
           items={[
-            { label: 'Assigned', value: assigned },
-            { label: 'Completed', value: completed, tone: 'ok' },
-            { label: 'Pending', value: pending, tone: 'warn' },
+            { label: t('home.assigned'), value: assigned },
+            { label: t('home.completed'), value: completed, tone: 'ok' },
+            { label: t('home.pending'), value: pending, tone: 'warn' },
           ]}
         />
         <div className="divider" />
         <div className="g-kpis">
           <div className="g-kpi bad">
             <div className="g-kpi-n">1</div>
-            <div className="g-kpi-l">High priority</div>
+            <div className="g-kpi-l">{t('home.high')}</div>
           </div>
           <div className="g-kpi warn">
             <div className="g-kpi-n">3</div>
-            <div className="g-kpi-l">Medium</div>
+            <div className="g-kpi-l">{t('home.medium')}</div>
           </div>
           <div className="g-kpi info">
             <div className="g-kpi-n">2</div>
-            <div className="g-kpi-l">New since 07:00</div>
+            <div className="g-kpi-l">{t('home.new')}</div>
           </div>
         </div>
       </Panel>
@@ -62,11 +56,11 @@ const Home = () => {
       )}
 
       <button className="g-btn g-btn-primary" onClick={() => navigate('/assignment')} style={{ minHeight: 54 }}>
-        ▶ &nbsp;START INSPECTION
+        ▶ &nbsp;{t('home.start')}
       </button>
 
       <SectionTitle aside={session.status !== 'assigned' ? <StatusChip status={session.status} /> : null}>
-        Upcoming inspection
+        {t('home.upcoming')}
       </SectionTitle>
 
       <div className="g-inst">
@@ -87,16 +81,16 @@ const Home = () => {
           <div className="mt">
             <div className="row tiny muted" style={{ justifyContent: 'space-between', marginBottom: 5 }}>
               <span>Inspection in progress</span>
-              <span>{checklistDone}/24 checklist · {session.evidence.length} evidence</span>
+              <span>{checklistDone}/{checklistTotal} checklist · {session.evidence.length} evidence · {overallPct}%</span>
             </div>
-            <Bar pct={(checklistDone / 24) * 100} tone="info" />
+            <Bar pct={overallPct} tone="info" />
           </div>
         ) : null}
         <button
           className="g-btn g-btn-primary mt"
           onClick={() => navigate(inProgress ? '/inspection/run' : '/assignment')}
         >
-          {inProgress ? 'RESUME INSPECTION' : 'OPEN ASSIGNMENT'}
+          {inProgress ? t('home.resume') : t('home.open')}
         </button>
       </div>
 
@@ -107,13 +101,13 @@ const Home = () => {
         </Note>
       ) : null}
 
-      <SectionTitle>Live monitoring</SectionTitle>
+      <SectionTitle>{t('home.live')}</SectionTitle>
       <Panel>
         <Kpis
           items={[
-            { label: 'CCTV online', value: LIVE.cctvOnline, tone: 'ok' },
-            { label: 'CCTV offline', value: LIVE.cctvOffline, tone: 'bad' },
-            { label: 'Anomalies', value: LIVE.anomalies, tone: 'warn' },
+            { label: t('home.cctvOn'), value: LIVE.cctvOnline, tone: 'ok' },
+            { label: t('home.cctvOff'), value: LIVE.cctvOffline, tone: 'bad' },
+            { label: t('home.anomalies'), value: LIVE.anomalies, tone: 'warn' },
           ]}
         />
         <div className="divider" />
@@ -125,18 +119,49 @@ const Home = () => {
           <div className="row" style={{ gap: 5 }}>
             <Chip tone={session.gps?.verified ? 'ok' : 'mute'} dot>{session.gps?.verified ? 'GPS ✓' : 'GPS —'}</Chip>
             <Chip tone={online ? 'ok' : 'bad'} dot>{online ? 'Network ✓' : 'Offline'}</Chip>
+            <Chip tone={session.ai.length ? 'warn' : 'mute'} dot>AI {session.ai.length || '—'}</Chip>
           </div>
         </div>
         <div className="divider" />
         <div className="row tiny muted" style={{ justifyContent: 'space-between' }}>
-          <span>Last sync</span>
+          <span>{t('home.lastSync')}</span>
           <b style={{ color: 'var(--ink)' }}>
             {session.syncState === 'synced' ? 'Today, 09:12 · Central Monitoring System' : 'Not synced — queued locally'}
           </b>
         </div>
         <button className="g-btn g-btn-quiet g-btn-sm mt" onClick={() => navigate('/monitoring')}>
-          Open CCTV wall
+          {t('home.openCctv')}
         </button>
+      </Panel>
+
+      <SectionTitle>{t('home.tools')}</SectionTitle>
+      <Panel pad={false}>
+        <div className="g-panel-bd">
+          <button type="button" className="g-list-row" onClick={() => navigate('/attendance')} style={{ background: 'none', border: 'none', width: '100%', textAlign: 'left', cursor: 'pointer' }}>
+            <div className="g-avatar sm" style={{ background: 'var(--info-bg)', color: 'var(--info-ink)' }} aria-hidden="true">🕒</div>
+            <div className="grow">
+              <div className="g-h3">{t('home.attendance')}</div>
+              <div className="tiny muted">{t('home.attendanceSub')}</div>
+            </div>
+            <span className="muted" aria-hidden="true">→</span>
+          </button>
+          <button type="button" className="g-list-row" onClick={() => navigate('/meet')} style={{ background: 'none', border: 'none', width: '100%', textAlign: 'left', cursor: 'pointer' }}>
+            <div className="g-avatar sm" style={{ background: 'var(--green-bg)', color: 'var(--green-ink)' }} aria-hidden="true">📹</div>
+            <div className="grow">
+              <div className="g-h3">{t('home.vc')}</div>
+              <div className="tiny muted">{t('home.vcSub')}</div>
+            </div>
+            <span className="muted" aria-hidden="true">→</span>
+          </button>
+          <button type="button" className="g-list-row" onClick={() => navigate('/directory')} style={{ background: 'none', border: 'none', width: '100%', textAlign: 'left', cursor: 'pointer', borderBottom: 'none' }}>
+            <div className="g-avatar sm" style={{ background: 'var(--amber-bg)', color: 'var(--amber)' }} aria-hidden="true">🏛️</div>
+            <div className="grow">
+              <div className="g-h3">{t('home.dir')}</div>
+              <div className="tiny muted">{t('home.dirSub')}</div>
+            </div>
+            <span className="muted" aria-hidden="true">→</span>
+          </button>
+        </div>
       </Panel>
     </>
   );

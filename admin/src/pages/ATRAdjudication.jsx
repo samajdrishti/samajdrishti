@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Paper, Grid, Chip, Button, Alert, Card, CardContent,
   Table, TableHead, TableRow, TableCell, TableBody, Dialog, DialogTitle,
-  DialogContent, DialogActions, TextField, Stack, Divider,
+  DialogContent, DialogActions, TextField, Stack, Divider, MenuItem,
 } from '@mui/material';
 import {
   Gavel as GavelIcon,
@@ -12,7 +12,7 @@ import {
   OpenInNew as OpenIcon,
   Refresh as RefreshIcon,
 } from '@mui/icons-material';
-import { atrAPI } from '../services/api';
+import { atrAPI, userAPI } from '../services/api';
 
 const statusColors = {
   escalated: 'error',
@@ -29,6 +29,59 @@ const ATRAdjudication = () => {
   const [adjudicationVerdict, setAdjudicationVerdict] = useState('');
   const [actionType, setActionType] = useState('approve'); // 'approve' | 'escalate' | 'reject'
   const [message, setMessage] = useState('');
+
+  // Raise-a-new-ATR dialog.
+  const [createOpen, setCreateOpen] = useState(false);
+  const [users, setUsers] = useState([]);
+  const [creating, setCreating] = useState(false);
+  const [form, setForm] = useState({
+    projectId: '',
+    inspectionId: '',
+    assignedTo: '',
+    actionDescription: '',
+    deficiencyTitle: '',
+    deadline: '',
+    priority: 'normal',
+  });
+
+  const openCreate = async () => {
+    setForm((f) => ({ ...f, projectId: '', inspectionId: '', assignedTo: '', actionDescription: '', deficiencyTitle: '', deadline: '', priority: 'normal' }));
+    setCreateOpen(true);
+    try {
+      const res = await userAPI.list({ active: true });
+      setUsers(Array.isArray(res.data) ? res.data.filter((u) => u.role === 'official' || u.role === 'ngo') : []);
+    } catch (err) {
+      setUsers([]);
+    }
+  };
+
+  const setField = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+
+  const handleCreate = async () => {
+    if (!form.actionDescription.trim()) {
+      setMessage('An action description is required to raise an ATR.');
+      return;
+    }
+    setCreating(true);
+    try {
+      await atrAPI.create({
+        project_id: form.projectId ? Number(form.projectId) : null,
+        inspection_id: form.inspectionId ? Number(form.inspectionId) : null,
+        assigned_to: form.assignedTo ? Number(form.assignedTo) : null,
+        action_description: form.actionDescription,
+        deficiency_title: form.deficiencyTitle || null,
+        deadline: form.deadline || null,
+        priority: form.priority || null,
+      });
+      setMessage('ATR raised — the assignee has been notified and the mobile app will show a new action.');
+      setCreateOpen(false);
+      load();
+    } catch (err) {
+      setMessage(err.response?.data?.message || 'Could not raise the ATR.');
+    } finally {
+      setCreating(false);
+    }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -85,9 +138,14 @@ const ATRAdjudication = () => {
             Central PMU & Zonal Monitoring Cell · Institutional Deficiency Adjudication & Enforcement
           </Typography>
         </Box>
-        <Button variant="outlined" size="small" startIcon={<RefreshIcon />} onClick={load}>
-          Refresh
-        </Button>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button variant="contained" size="small" color="success" startIcon={<GavelIcon />} onClick={openCreate}>
+            Raise New ATR
+          </Button>
+          <Button variant="outlined" size="small" startIcon={<RefreshIcon />} onClick={load}>
+            Refresh
+          </Button>
+        </Box>
       </Box>
 
       {message && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setMessage('')}>{message}</Alert>}
@@ -234,6 +292,66 @@ const ATRAdjudication = () => {
             onClick={handleConfirmAdjudication}
           >
             Confirm & Issue Order
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Raise a new ATR dialog */}
+      <Dialog open={createOpen} onClose={() => setCreateOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700 }}>⚖️ Raise New Action Taken Report</DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+            An ATR must reference an inspection, anomaly or project so it can be traced. The assignee
+            is notified immediately and sees the new action on their mobile app.
+          </Typography>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField
+              select fullWidth size="small" label="Assign to (official / NGO)" value={form.assignedTo}
+              onChange={setField('assignedTo')}
+            >
+              <MenuItem value="">Unassigned</MenuItem>
+              {users.map((u) => (
+                <MenuItem key={u.id} value={u.id}>{u.name} ({u.role})</MenuItem>
+              ))}
+            </TextField>
+            <Stack direction="row" spacing={2}>
+              <TextField
+                size="small" label="Project ID (optional)" value={form.projectId}
+                onChange={setField('projectId')} sx={{ flexGrow: 1 }}
+              />
+              <TextField
+                size="small" label="Inspection ID (optional)" value={form.inspectionId}
+                onChange={setField('inspectionId')} sx={{ flexGrow: 1 }}
+              />
+            </Stack>
+            <TextField
+              size="small" label="Deficiency / action title" value={form.deficiencyTitle}
+              onChange={setField('deficiencyTitle')} fullWidth
+            />
+            <TextField
+              size="small" multiline rows={3} label="Action description (required)"
+              value={form.actionDescription} onChange={setField('actionDescription')} fullWidth
+            />
+            <Stack direction="row" spacing={2}>
+              <TextField
+                size="small" type="date" label="Deadline (optional)" value={form.deadline}
+                onChange={setField('deadline')} sx={{ flexGrow: 1 }} InputLabelProps={{ shrink: true }}
+              />
+              <TextField
+                select size="small" label="Priority" value={form.priority} onChange={setField('priority')}
+                sx={{ width: 130 }}
+              >
+                <MenuItem value="low">Low</MenuItem>
+                <MenuItem value="normal">Normal</MenuItem>
+                <MenuItem value="high">High</MenuItem>
+              </TextField>
+            </Stack>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCreateOpen(false)}>Cancel</Button>
+          <Button variant="contained" color="success" disabled={creating} onClick={handleCreate}>
+            {creating ? 'Raising…' : 'Raise ATR'}
           </Button>
         </DialogActions>
       </Dialog>

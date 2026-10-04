@@ -1,4 +1,3 @@
-import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useInspection } from '../context/InspectionContext';
 import { TopBar, Panel, KV, Steps, Chip, StatusChip, SectionTitle, Bar } from '../components/ui';
@@ -6,28 +5,31 @@ import { TopBar, Panel, KV, Steps, Chip, StatusChip, SectionTitle, Bar } from '.
 const fmtClock = (iso) => (iso ? new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—');
 
 const InspectionRun = () => {
-  const { session, online, checklistDone, durationMin } = useInspection();
+  const { session, online, checklistDone, checklistTotal, durationMin, overallPct } = useInspection();
   const navigate = useNavigate();
   const s = session;
   const inst = s.institution;
   const vcDone = s.vc.status === 'ended';
   const hasEvidence = s.evidence.length > 0;
   const aiDone = s.ai.length > 0;
+  const beneDone = s.beneficiary.status === 'completed';
 
   const steps = [
     { title: 'Location', state: 'done', detail: `GPS verified · ${s.gps ? `${s.gps.distanceM} m from gate` : ''}` },
     { title: 'Identity', state: 'done', detail: `${inst.incharge}` },
     { title: 'Live VC', state: vcDone ? 'done' : s.vc.status === 'active' ? 'active' : 'todo', detail: vcDone ? 'Completed and recorded' : s.vc.status === 'active' ? 'Call in progress' : 'Random video check pending' },
+    { title: 'Beneficiaries', state: beneDone ? 'done' : s.beneficiary.status === 'active' ? 'active' : 'todo', detail: beneDone ? 'Sample verified & signed' : `${s.beneficiary.selected.length || 0} sampled` },
     { title: 'Evidence', state: hasEvidence ? 'done' : 'todo', detail: `${s.evidence.length} items captured` },
-    { title: 'Checklist', state: checklistDone === 24 ? 'done' : checklistDone ? 'active' : 'todo', detail: `${checklistDone} / 24 checks completed` },
+    { title: 'Checklist', state: checklistDone === checklistTotal ? 'done' : checklistDone ? 'active' : 'todo', detail: `${checklistDone} / ${checklistTotal} checks completed` },
     { title: 'AI analysis', state: aiDone ? 'done' : 'todo', detail: aiDone ? `${s.ai.length} indicators raised` : 'Runs after checklist' },
     { title: 'Submit', state: s.status === 'submitted' ? 'done' : 'todo', detail: s.status === 'submitted' ? s.reportId : 'Secure report submission' },
   ];
 
   const actions = [
     { to: '/vc', icon: '🎥', label: 'Random video check', sub: vcDone ? 'Completed' : s.vc.status === 'active' ? 'Live now' : 'Not started', tone: s.vc.status === 'active' ? 'ok' : 'mute' },
+    { to: '/beneficiary', icon: '🧑', label: 'Beneficiary verification', sub: beneDone ? 'Verified & signed' : s.beneficiary.status === 'active' ? 'In progress' : 'Random sample', tone: beneDone ? 'ok' : 'mute' },
     { to: '/evidence/capture', icon: '📷', label: 'Capture evidence', sub: `${s.evidence.length} items`, tone: 'mute' },
-    { to: '/checklist', icon: '☑️', label: 'Inspection checklist', sub: `${checklistDone}/24`, tone: checklistDone ? 'ok' : 'mute' },
+    { to: '/checklist', icon: '☑️', label: 'Inspection checklist', sub: `${checklistDone}/${checklistTotal}`, tone: checklistDone ? 'ok' : 'mute' },
     { to: '/ai', icon: '🤖', label: 'Attendance & AI analysis', sub: aiDone ? `${s.ai.length} indicators` : 'Pending', tone: aiDone ? 'warn' : 'mute' },
     { to: '/inspection/summary', icon: '📋', label: 'Inspection summary', sub: `${durationMin} min`, tone: 'mute' },
   ];
@@ -63,10 +65,10 @@ const InspectionRun = () => {
           <div className="row tiny muted" style={{ justifyContent: 'space-between', marginBottom: 6 }}>
             <span>Overall completion</span>
             <b style={{ color: 'var(--ink)' }}>
-              {Math.round(((steps.filter((x) => x.state === 'done').length) / steps.length) * 100)}%
+              {overallPct}%
             </b>
           </div>
-          <Bar pct={((steps.filter((x) => x.state === 'done').length) / steps.length) * 100} />
+          <Bar pct={overallPct} />
           <div className="divider" />
           <Steps steps={steps} />
         </Panel>

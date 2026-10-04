@@ -1,16 +1,23 @@
-import React, { useEffect, useState } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 import { useRealtime } from '../services/realtime';
 import { useInspection } from '../context/InspectionContext';
+import { notificationAPI } from '../services/api';
 
-const TABS = [
-  { to: '/', label: 'Home', icon: '🏠', end: true },
-  { to: '/inspections', label: 'Inspections', icon: '📋' },
-  { to: '/evidence', label: 'Evidence', icon: '📷' },
-  { to: '/alerts', label: 'Alerts', icon: '🔔' },
-  { to: '/profile', label: 'Profile', icon: '👤' },
+const TAB_DEFS = [
+  { to: '/', key: 'nav.home', icon: '🏠', end: true },
+  { to: '/inspections', key: 'nav.inspections', icon: '📋' },
+  { to: '/evidence', key: 'nav.evidence', icon: '📷' },
+  { to: '/alerts', key: 'nav.alerts', icon: '🔔' },
+  { to: '/profile', key: 'nav.profile', icon: '👤' },
 ];
+
+/** Immersive steps hide the tab bar so the camera / GPS / VC get full height. */
+const IMMERSIVE_PREFIXES = ['/vc', '/evidence/capture', '/gps', '/meet'];
+
+const TOAST_ICON = { error: '⚠️', success: '✅', warning: '⚠️', info: '🔔' };
 
 const Toast = ({ toast, onClose }) => {
   useEffect(() => {
@@ -19,22 +26,57 @@ const Toast = ({ toast, onClose }) => {
   }, [toast.id, onClose]);
 
   return (
-    <div className={`toast toast-${toast.level}`} onClick={onClose}>
-      <span className="toast-icon">{toast.level === 'error' ? '⚠️' : toast.level === 'success' ? '✅' : '🔔'}</span>
-      <div>
+    <div
+      className="toast"
+      data-level={toast.level || 'info'}
+      onClick={onClose}
+      role="alert"
+    >
+      <span className="toast-icon" aria-hidden="true">{TOAST_ICON[toast.level] || '🔔'}</span>
+      <div className="grow">
         <div className="toast-title">{toast.title}</div>
-        <div className="toast-body">{toast.body}</div>
+        {toast.body ? <div className="toast-body">{toast.body}</div> : null}
       </div>
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onClose(); }}
+        aria-label={`Dismiss: ${toast.title}`}
+        className="toast-close"
+      >
+        ✕
+      </button>
     </div>
   );
 };
 
 const Layout = ({ children }) => {
   const { user } = useAuth();
+  const { t } = useLanguage();
   const { connected, events } = useRealtime();
-  const { online, pendingEvidence, session } = useInspection();
+  const { online, pendingEvidence, syncing, syncNow } = useInspection();
   const [toasts, setToasts] = useState([]);
+  const [unreadAlerts, setUnreadAlerts] = useState(0);
   const location = useLocation();
+  const navigate = useNavigate();
+  const mainRef = useRef(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => notificationAPI.list()
+      .then(({ data }) => {
+        if (!cancelled && Array.isArray(data)) {
+          setUnreadAlerts(data.filter((n) => !n.is_read).length);
+        }
+      })
+      .catch(() => {});
+    load();
+    const timer = setInterval(load, 30000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, []);
+
+  const dismissToast = useCallback((id) => {
+    setToasts((current) => current.filter((t) => t.id !== id));
+  }, []);
 
   useEffect(() => {
     if (!events.length) return;
@@ -57,47 +99,95 @@ const Layout = ({ children }) => {
     });
   }, [events]);
 
-  // Hide the tab bar on the immersive inspection steps.
-  const immersive = ['/vc', '/evidence/capture', '/gps'].some((p) => location.pathname.startsWith(p));
+  // Reset scroll + move focus to main on route change (screen-reader friendly).
+  useEffect(() => {
+    mainRef.current?.focus({ preventScroll: true });
+    window.scrollTo({ top: 0 });
+  }, [location.pathname]);
+
+  const immersive = IMMERSIVE_PREFIXES.some((p) => location.pathname.startsWith(p));
+  const statusLabel = connected ? t('status.live') : online ? t('status.online') : t('status.offline');
+  const statusClass = connected ? 'badge-live' : online ? 'badge-online' : 'badge-offline';
+  const TABS = TAB_DEFS.map((tab) => ({ ...tab, label: t(tab.key) }));
+
+  const onTabKeyDown = (e, idx) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    const next = (idx + (e.key === 'ArrowRight' ? 1 : TABS.length - 1)) % TABS.length;
+    document.querySelectorAll('.tab-bar .tab')[next]?.focus();
+  };
 
   return (
     <div className="app">
-      <header className="app-header">
+      <a className="skip-link" href="#main-content">{t('nav.skip')}</a>
+      <header className="app-header" role="banner">
         <div className="brand">
-          <span className="brand-mark">🛡️</span>
+          <span className="brand-mark" aria-hidden="true">🛡️</span>
           <div>
-            <div className="brand-name">DoSJE SmartInspect</div>
+            <div className="brand-name">Samaj Drishti</div>
             <div className="brand-sub">{user ? user.name : 'Field Inspection Portal'}</div>
           </div>
         </div>
-        <div className="header-badges">
-          {pendingEvidence > 0 && <span className="badge badge-warn" title="Waiting to sync">⇅ {pendingEvidence}</span>}
-          <span className={`badge ${connected || online ? 'badge-live' : 'badge-offline'}`}>
-            {connected || online ? 'LIVE' : 'OFFLINE'}
-          </span>
+        <div className="header-badges" role="status" aria-label={`Connection status: ${statusLabel}`}>
+          {pendingEvidence > 0 && (
+            <button
+              type="button"
+              className="badge badge-warn"
+              title="Evidence waiting to sync — open sync queue"
+              onClick={() => navigate('/offline')}
+              style={{ border: 'none', cursor: 'pointer' }}
+            >
+              ⇅ {pendingEvidence}
+            </button>
+          )}
+          <span className={`badge ${statusClass}`}>{statusLabel}</span>
         </div>
       </header>
 
-      <main className="app-main">{children}</main>
+      {!online && !immersive ? (
+        <div style={{ padding: '10px 16px 0' }} role="status">
+          <div className="offline-strip">
+            <span aria-hidden="true">⚠</span>
+            <span className="grow">{t('offline.saved')}{pendingEvidence ? ` · ${pendingEvidence} ${t('offline.queued')}` : ''}</span>
+            {pendingEvidence > 0 && online ? (
+              <button type="button" className="conn-refresh-btn" onClick={syncNow} disabled={syncing}>
+                {syncing ? 'Syncing…' : 'Sync'}
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
-      <nav className="tab-bar">
-        {TABS.map((tab) => (
-          <NavLink
-            key={tab.to}
-            to={tab.to}
-            end={tab.end}
-            className={({ isActive }) => `tab ${isActive ? 'tab-active' : ''}`}
-          >
-            <span className="tab-icon">{tab.icon}</span>
-            <span className="tab-label">{tab.label}</span>
-            {tab.to === '/alerts' && session.status !== 'submitted' ? <span className="badge badge-warn" style={{ position: 'absolute', top: 6, right: 22 }}>2</span> : null}
-          </NavLink>
-        ))}
-      </nav>
+      <main id="main-content" ref={mainRef} className="app-main" tabIndex={-1} aria-label="Samaj Drishti field content">
+        {children}
+      </main>
 
-      <div className="toast-stack">
+      {immersive ? null : (
+        <nav className="tab-bar" aria-label="Main navigation">
+          {TABS.map((tab, idx) => (
+            <NavLink
+              key={tab.to}
+              to={tab.to}
+              end={tab.end}
+              aria-current={undefined}
+              className={({ isActive }) => `tab ${isActive ? 'tab-active' : ''}`}
+              onKeyDown={(e) => onTabKeyDown(e, idx)}
+            >
+              <span className="tab-icon" aria-hidden="true">{tab.icon}</span>
+              <span className="tab-label">{tab.label}</span>
+              {tab.to === '/alerts' && unreadAlerts > 0 ? (
+                <span className="badge badge-warn tab-badge" aria-label={`${unreadAlerts} unread alerts`}>
+                  {unreadAlerts > 9 ? '9+' : unreadAlerts}
+                </span>
+              ) : null}
+            </NavLink>
+          ))}
+        </nav>
+      )}
+
+      <div className="toast-stack" aria-live="polite" aria-atomic="false">
         {toasts.map((toast) => (
-          <Toast key={toast.id} toast={toast} onClose={() => setToasts((c) => c.filter((t) => t.id !== toast.id))} />
+          <Toast key={toast.id} toast={toast} onClose={() => dismissToast(toast.id)} />
         ))}
       </div>
     </div>

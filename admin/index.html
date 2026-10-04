@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>DoSJE SmartInspect — National Monitoring Command Center</title>
+  <title>Samaj Drishti — National Monitoring Command Center</title>
+  <!-- Runtime backend URL (overwritten by docker-entrypoint.sh from $API_URL).
+       Keeps the image portable: no rebuild needed to point at another API. -->
+  <script src="/config.js"></script>
 </head>
 <body>
   <div id="root"></div>

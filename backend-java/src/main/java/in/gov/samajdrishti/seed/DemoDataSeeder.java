@@ -3,6 +3,8 @@ package in.gov.samajdrishti.seed;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
@@ -699,28 +701,177 @@ public class DemoDataSeeder implements ApplicationRunner {
 
     /** Photo and video captures on the finished inspections. */
     private void seedEvidence(List<Inspection> finished) {
+        String firstInspectionHash = null;
         for (int idx = 0; idx < Math.min(10, finished.size()); idx++) {
             Inspection inspection = finished.get(idx);
             GeoPoint base = projectById(inspection.getProjectId()).getGeoCoords();
             boolean video = idx % 3 == 2;
+            String filename = "demo-%d.%s".formatted(inspection.getId(), video ? "mp4" : "jpg");
+            byte[] fileBytes = createSampleEvidenceImage(
+                    "Inspection #" + inspection.getId() + " - " + (video ? "Spot Video Recording" : "Ground Site Photo"),
+                    "Project #" + inspection.getProjectId() + " · Officer #" + inspection.getAssignedTo(),
+                    "%.4f, %.4f".formatted(base.getLat() + 0.0003, base.getLng() + 0.0003),
+                    "DEMO-VAULT-" + inspection.getId() + "-" + idx
+            );
+            writeEvidenceFile(filename, fileBytes);
+            String fileHash = sha256(fileBytes);
+            if (idx == 0) {
+                firstInspectionHash = fileHash;
+            }
+
+            boolean isVerified = !"flagged".equals(inspection.getStatus());
             Evidence record = new Evidence();
             record.setInspectionId(inspection.getId());
             record.setType(video ? "video" : "photo");
-            record.setFilePath("/uploads/evidence/demo-%d.%s".formatted(inspection.getId(), video ? "mp4" : "jpg"));
+            record.setFilePath("/uploads/evidence/" + filename);
             record.setUploadedBy(inspection.getAssignedTo());
-            record.setFileName("demo-%d.%s".formatted(inspection.getId(), video ? "mp4" : "jpg"));
+            record.setFileName(filename);
             record.setContentType(video ? "video/mp4" : "image/jpeg");
+            record.setFileSize((long) fileBytes.length);
             record.setGeoCoords(new GeoPoint(base.getLat() + 0.0003, base.getLng() + 0.0003));
             record.setAccuracy(8.0);
             record.setTimestamp(Instant.now().minusSeconds((idx + 1L) * 86_400L));
-            record.setVerified(!"flagged".equals(inspection.getStatus()));
+            record.setVerified(isVerified);
+            record.setIntegrityStatus(isVerified ? "verified" : "hashed");
+            record.setHashVerified(isVerified);
+            if (isVerified) {
+                record.setVerifiedAt(record.getTimestamp().plusSeconds(3600));
+                record.setVerifiedBy(1);
+            }
             record.setSyncStatus("synced");
-            // Distinct per row: a shared hash would read as a duplicate upload to the
-            // evidence-integrity checks, which is the opposite of what the seed intends.
-            record.setFileHash(sha256("demo-evidence-%d-%d".formatted(inspection.getId(), idx)));
+            record.setFileHash(fileHash);
+            record.setPreviousHash(null);
             record.setClientId("seed-evidence-%d-%d".formatted(inspection.getId(), idx));
             record.setCreatedAt(Instant.now().minusSeconds((idx + 1L) * 86_400L));
             evidence.save(record);
+        }
+
+        seedDemoFakeEvidence(finished.isEmpty() ? null : finished.get(0), firstInspectionHash);
+    }
+
+    private void seedDemoFakeEvidence(Inspection inspection, String firstHash) {
+        int inspectionId = inspection != null ? inspection.getId() : 1;
+        GeoPoint base = inspection != null ? projectById(inspection.getProjectId()).getGeoCoords() : new GeoPoint(11.0059, 76.9286);
+
+        // 1. Fake Evidence 1: Ramp Access Compliance (Signed off / Integrity OK)
+        String fn1 = "fake-evidence-ramp-compliance.jpg";
+        byte[] bytes1 = createSampleEvidenceImage(
+                "Physical Accessibility Ramp & CPWD Gradient Verification",
+                "Inspection #" + inspectionId + " · Anugraha Senior Citizens Home (AVYAY)",
+                "%.4f, %.4f".formatted(base.getLat() + 0.0001, base.getLng() + 0.0002),
+                "SEC-SEAL-2026-RAMP-01"
+        );
+        writeEvidenceFile(fn1, bytes1);
+        String hash1 = sha256(bytes1);
+
+        Evidence e1 = new Evidence();
+        e1.setInspectionId(inspectionId);
+        e1.setType("photo");
+        e1.setFilePath("/uploads/evidence/" + fn1);
+        e1.setFileName("accessibility-ramp-cpwd-compliance.jpg");
+        e1.setContentType("image/jpeg");
+        e1.setFileSize((long) bytes1.length);
+        e1.setGeoCoords(new GeoPoint(base.getLat() + 0.0001, base.getLng() + 0.0002));
+        e1.setAccuracy(4.2);
+        e1.setTimestamp(Instant.now().minusSeconds(1800));
+        e1.setVerified(true);
+        e1.setVerifiedBy(1);
+        e1.setVerifiedAt(Instant.now().minusSeconds(900));
+        e1.setIntegrityStatus("verified");
+        e1.setHashVerified(true);
+        e1.setFileHash(hash1);
+        e1.setPreviousHash(firstHash);
+        e1.setClientId("fake-evidence-001");
+        e1.setSyncStatus("synced");
+        e1.setCreatedAt(Instant.now().minusSeconds(1800));
+        evidence.save(e1);
+
+        // 2. Fake Evidence 2: Biometric AEBAS Punch Terminal (Pending Sign-off / HASHED)
+        String fn2 = "fake-evidence-biometric-terminal.jpg";
+        byte[] bytes2 = createSampleEvidenceImage(
+                "Biometric AEBAS Terminal & Beneficiary Roll Validation",
+                "Inspection #" + inspectionId + " · Anugraha Senior Citizens Home (AVYAY)",
+                "%.4f, %.4f".formatted(base.getLat(), base.getLng()),
+                "SEC-SEAL-2026-AEBAS-02"
+        );
+        writeEvidenceFile(fn2, bytes2);
+        String hash2 = sha256(bytes2);
+
+        Evidence e2 = new Evidence();
+        e2.setInspectionId(inspectionId);
+        e2.setType("photo");
+        e2.setFilePath("/uploads/evidence/" + fn2);
+        e2.setFileName("aebas-biometric-attendance-terminal.jpg");
+        e2.setContentType("image/jpeg");
+        e2.setFileSize((long) bytes2.length);
+        e2.setGeoCoords(new GeoPoint(base.getLat(), base.getLng()));
+        e2.setAccuracy(3.8);
+        e2.setTimestamp(Instant.now().minusSeconds(600));
+        e2.setVerified(false);
+        e2.setIntegrityStatus("hashed");
+        e2.setHashVerified(null);
+        e2.setFileHash(hash2);
+        e2.setPreviousHash(hash1);
+        e2.setClientId("fake-evidence-002");
+        e2.setSyncStatus("synced");
+        e2.setCreatedAt(Instant.now().minusSeconds(600));
+        evidence.save(e2);
+    }
+
+    private void writeEvidenceFile(String filename, byte[] bytes) {
+        List<Path> targets = List.of(
+                Path.of(properties.uploads().evidenceDir()).toAbsolutePath().normalize().resolve(filename),
+                Path.of("uploads/evidence").toAbsolutePath().normalize().resolve(filename),
+                Path.of("backend-java/uploads/evidence").toAbsolutePath().normalize().resolve(filename),
+                Path.of("../backend-java/uploads/evidence").toAbsolutePath().normalize().resolve(filename)
+        );
+        for (Path target : targets) {
+            try {
+                if (target.getParent() != null) {
+                    Files.createDirectories(target.getParent());
+                }
+                Files.write(target, bytes);
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    private byte[] createSampleEvidenceImage(String title, String subtitle, String geo, String tag) {
+        try {
+            java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(640, 360, java.awt.image.BufferedImage.TYPE_INT_RGB);
+            java.awt.Graphics2D g = img.createGraphics();
+            g.setColor(new java.awt.Color(15, 23, 42));
+            g.fillRect(0, 0, 640, 360);
+
+            g.setColor(new java.awt.Color(59, 130, 246));
+            g.fillRect(0, 0, 640, 8);
+
+            g.setColor(new java.awt.Color(248, 250, 252));
+            g.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 18));
+            g.drawString("Samaj Drishti · Field Inspection Evidence", 24, 45);
+
+            g.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 14));
+            g.setColor(new java.awt.Color(147, 197, 253));
+            g.drawString(title, 24, 85);
+
+            g.setFont(new java.awt.Font("SansSerif", java.awt.Font.PLAIN, 12));
+            g.setColor(new java.awt.Color(203, 213, 225));
+            g.drawString(subtitle, 24, 115);
+            g.drawString("GPS NavIC Lock: " + geo, 24, 140);
+            g.drawString("Security Tag: " + tag, 24, 165);
+
+            g.setColor(new java.awt.Color(30, 41, 59));
+            g.fillRect(0, 300, 640, 60);
+            g.setColor(new java.awt.Color(16, 185, 129));
+            g.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 11));
+            g.drawString("CRYPTOGRAPHICALLY SEALED · SHA-256 TAMPER EVIDENT VAULT", 24, 335);
+
+            g.dispose();
+            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+            javax.imageio.ImageIO.write(img, "jpg", baos);
+            return baos.toByteArray();
+        } catch (Exception e) {
+            return ("Samaj Drishti Evidence: " + title + " / " + geo).getBytes(StandardCharsets.UTF_8);
         }
     }
 
@@ -1006,14 +1157,36 @@ public class DemoDataSeeder implements ApplicationRunner {
             Inspection inspection = completed.get(i);
             GeoPoint base = projectById(inspection.getProjectId()).getGeoCoords();
             double offset = offsets[i % offsets.length];
+            String filename = "geo-check-%d.jpg".formatted(inspection.getId());
+            byte[] fileBytes = createSampleEvidenceImage(
+                    "Geo-Check Spot Capture #" + inspection.getId(),
+                    "Inspection #" + inspection.getId() + " · Perimeter Verification",
+                    "%.4f, %.4f".formatted(base.getLat() + offset, base.getLng() + offset),
+                    "GEOCHECK-" + inspection.getId()
+            );
+            writeEvidenceFile(filename, fileBytes);
+            String fileHash = sha256(fileBytes);
 
             Evidence record = new Evidence();
             record.setInspectionId(inspection.getId());
             record.setType("photo");
-            record.setFilePath("/uploads/evidence/geo-check-%d.jpg".formatted(inspection.getId()));
+            record.setFilePath("/uploads/evidence/" + filename);
+            record.setFileName(filename);
+            record.setContentType("image/jpeg");
+            record.setFileSize((long) fileBytes.length);
             record.setGeoCoords(new GeoPoint(base.getLat() + offset, base.getLng() + offset));
+            record.setAccuracy(5.0);
             record.setTimestamp(Instant.now().minusSeconds((i - 7L) * 5_400L));
-            record.setVerified(offset < 0.001);
+            boolean ok = offset < 0.001;
+            record.setVerified(ok);
+            record.setIntegrityStatus(ok ? "verified" : "hashed");
+            record.setHashVerified(ok);
+            if (ok) {
+                record.setVerifiedAt(record.getTimestamp().plusSeconds(1800));
+                record.setVerifiedBy(1);
+            }
+            record.setFileHash(fileHash);
+            record.setSyncStatus("synced");
             record.setCreatedAt(Instant.now().minusSeconds((i - 7L) * 5_400L));
             evidence.save(record);
         }
@@ -1024,29 +1197,77 @@ public class DemoDataSeeder implements ApplicationRunner {
         if (admin == null) {
             return;
         }
-        List<Integer> officialIds = users.findByRoleOrderByIdAsc("official").stream().map(User::getId).toList();
-        Integer firstOfficial = officialIds.isEmpty() ? null : officialIds.get(0);
-        String firstOfficialName = firstOfficial == null
-                ? "Field Official"
-                : users.findById(firstOfficial).map(User::getName).orElse("Field Official");
+        User supervisor = users.findByRoleOrderByIdAsc("supervisor").stream().findFirst().orElse(null);
+        List<User> officials = users.findByRoleOrderByIdAsc("official");
+        User official1 = officials.isEmpty() ? admin : officials.get(0);
+        User official2 = officials.size() > 1 ? officials.get(1) : official1;
+        User ngo = users.findByRoleOrderByIdAsc("ngo").stream().findFirst().orElse(null);
 
         record AuditSpec(Integer actorId, String actorName, String action, String entity, Integer entityId,
-                         Map<String, Object> meta) {
+                         String ip, long secondsAgo, Map<String, Object> meta) {
         }
-        List<AuditSpec> specs = List.of(
-                new AuditSpec(admin.getId(), admin.getName(), "inspection.assigned", "inspection", 1,
-                        Map.of("note", "Initial random allocation")),
-                new AuditSpec(admin.getId(), admin.getName(), "project.created", "project", 1,
-                        Map.of("note", "Anugraha Senior Citizens Home - Kuniyamuthur Block")),
-                new AuditSpec(firstOfficial, firstOfficialName, "inspection.status_changed", "inspection", 1,
-                        Map.of("from", "pending", "to", "completed")),
-                new AuditSpec(firstOfficial, firstOfficialName, "evidence.uploaded", "evidence", 1,
-                        Map.of("type", "photo", "verified", true)),
-                new AuditSpec(admin.getId(), admin.getName(), "vc.session_ended", "vc_session", 1,
-                        Map.of("room", "ReviewBoardSamajDrishti-1001")));
 
-        for (int i = 0; i < specs.size(); i++) {
-            AuditSpec spec = specs.get(i);
+        List<AuditSpec> specs = List.of(
+                new AuditSpec(admin.getId(), admin.getName(), "project.created", "project", 1,
+                        "10.20.14.82", 5L * 86400L,
+                        Map.of("note", "Anugraha Senior Citizens Home registered under AVYAY scheme", "district", "Coimbatore", "sanctioned_capacity", 50)),
+                new AuditSpec(admin.getId(), admin.getName(), "user.enrolled", "user", official1.getId(),
+                        "10.20.14.82", 4L * 86400L + 18000L,
+                        Map.of("official", official1.getName(), "role", "official", "2fa_enforced", true, "division", "Coimbatore North")),
+                new AuditSpec(null, "AI Allotment Engine", "ai.allotment_generated", "inspection", 1,
+                        "127.0.0.1 (ai-engine:5001)", 3L * 86400L + 14400L,
+                        Map.of("algorithm", "randomised_risk_weighted_assigner", "conflict_score", 0.0, "risk_weight", 88.5, "assigned_to", official1.getName())),
+                new AuditSpec(admin.getId(), admin.getName(), "inspection.assigned", "inspection", 1,
+                        "10.20.14.82", 3L * 86400L + 7200L,
+                        Map.of("official", official1.getName(), "scheme", "AVYAY", "type", "risk_targeted", "note", "Mandatory physical compliance verification")),
+                new AuditSpec(official1.getId(), official1.getName(), "inspection.accepted", "inspection", 1,
+                        "192.168.1.104 (NavIC-Unit-01)", 2L * 86400L + 28800L,
+                        Map.of("device", "NavIC Mobile Field Unit #1", "status", "acknowledged", "battery", "94%")),
+                new AuditSpec(official1.getId(), official1.getName(), "geo_verification.verified", "inspection", 1,
+                        "192.168.1.104 (NavIC-Unit-01)", 2L * 86400L + 21600L,
+                        Map.of("distance_meters", 24.6, "verdict", "within_geofence", "tolerance_radius", 250, "lat", 11.0059, "lng", 76.9286)),
+                new AuditSpec(official1.getId(), official1.getName(), "attendance.checked_in", "attendance", 1,
+                        "192.168.1.104 (NavIC-Unit-01)", 2L * 86400L + 21000L,
+                        Map.of("terminal", "AEBAS-CBE-101", "biometric_status", "verified", "headcount_registered", 48, "headcount_present", 48)),
+                new AuditSpec(official1.getId(), official1.getName(), "evidence.uploaded", "evidence", 11,
+                        "192.168.1.104 (NavIC-Unit-01)", 2L * 86400L + 18000L,
+                        Map.of("type", "photo", "filename", "accessibility-ramp-cpwd-compliance.jpg", "sha256", "be76f6be2385...", "watermark", "SEC-SEAL-2026-RAMP-01")),
+                new AuditSpec(admin.getId(), admin.getName(), "evidence.verified", "evidence", 11,
+                        "10.20.14.82", 2L * 86400L + 14400L,
+                        Map.of("verdict", "authentic", "file_hash_match", true, "chain_link", "intact", "officer", admin.getName())),
+                new AuditSpec(null, "NavIC Geofence Watchdog", "geo_verification.suspicious", "inspection", 9,
+                        "49.206.12.8", 2L * 86400L + 7200L,
+                        Map.of("distance_meters", 1840.5, "verdict", "geofence_breach", "warning", "Inspection submission attempted 1.8km outside site perimeter")),
+                new AuditSpec(official1.getId(), official1.getName(), "checklist.submitted", "inspection", 1,
+                        "192.168.1.104 (NavIC-Unit-01)", 1L * 86400L + 28800L,
+                        Map.of("items_checked", 12, "score", 83, "flagged_deficiencies", 1, "deficiency", "Tactile guidance pathway incomplete at wing B")),
+                new AuditSpec(official1.getId(), official1.getName(), "inspection.status_changed", "inspection", 1,
+                        "192.168.1.104 (NavIC-Unit-01)", 1L * 86400L + 21600L,
+                        Map.of("from", "in_progress", "to", "completed", "duration_minutes", 46)),
+                new AuditSpec(supervisor != null ? supervisor.getId() : admin.getId(),
+                        supervisor != null ? supervisor.getName() : admin.getName(),
+                        "atr.created", "atr", 1, "10.20.14.90", 1L * 86400L + 14400L,
+                        Map.of("target", "Anugraha Senior Citizens Home", "deficiency", "CPWD Ramp gradient & tactile guidance installation", "grace_period_days", 14)),
+                new AuditSpec(ngo != null ? ngo.getId() : admin.getId(),
+                        ngo != null ? ngo.getName() : "Anugraha NGO Admin",
+                        "atr.ngo_reply_submitted", "atr", 1, "122.178.44.12", 18 * 3600L,
+                        Map.of("action_taken", "Tactile pavers installed and ramp handrails aligned to CPWD standards", "evidence_count", 2)),
+                new AuditSpec(admin.getId(), admin.getName(), "vc.session_opened", "vc_session", 1,
+                        "10.20.14.82", 8 * 3600L,
+                        Map.of("room", "ReviewBoardSamajDrishti-1001", "purpose", "Tripartite ATR Hearing", "participants", 3)),
+                new AuditSpec(admin.getId(), admin.getName(), "vc.session_ended", "vc_session", 1,
+                        "10.20.14.82", 7 * 3600L,
+                        Map.of("room", "ReviewBoardSamajDrishti-1001", "verdict", "Compliance verified via live video walkthrough", "duration_minutes", 28)),
+                new AuditSpec(supervisor != null ? supervisor.getId() : admin.getId(),
+                        supervisor != null ? supervisor.getName() : admin.getName(),
+                        "atr.adjudicated", "atr", 1, "10.20.14.90", 3 * 3600L,
+                        Map.of("verdict", "APPROVED_AND_CLOSED", "adjudicator", supervisor != null ? supervisor.getName() : admin.getName(), "penalty_levied", "none")),
+                new AuditSpec(admin.getId(), admin.getName(), "report.shared", "inspection", 1,
+                        "10.20.14.82", 900L,
+                        Map.of("recipient", "State PMU Cell, DoSJE", "export_format", "PDF/A-1b", "integrity_hash", "9f82c401be33..."))
+        );
+
+        for (AuditSpec spec : specs) {
             AuditEntry entry = new AuditEntry();
             entry.setActorId(spec.actorId());
             entry.setActorName(spec.actorName());
@@ -1054,7 +1275,8 @@ public class DemoDataSeeder implements ApplicationRunner {
             entry.setEntity(spec.entity());
             entry.setEntityId(spec.entityId());
             entry.setMeta(spec.meta());
-            entry.setCreatedAt(Instant.now().minusSeconds((i + 1L) * 3600L));
+            entry.setIpAddress(spec.ip());
+            entry.setCreatedAt(Instant.now().minusSeconds(spec.secondsAgo()));
             audit.save(entry);
         }
     }
@@ -1085,6 +1307,15 @@ public class DemoDataSeeder implements ApplicationRunner {
         try {
             return HexFormat.of().formatHex(
                     MessageDigest.getInstance("SHA-256").digest(seed.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is required by the JLS but unavailable", e);
+        }
+    }
+
+    private static String sha256(byte[] bytes) {
+        try {
+            return HexFormat.of().formatHex(
+                    MessageDigest.getInstance("SHA-256").digest(bytes));
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 is required by the JLS but unavailable", e);
         }

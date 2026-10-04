@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import {
   Box, Typography, Grid, Paper, Card, CardContent, Chip, Button, Alert, Table,
   TableBody, TableCell, TableContainer, TableHead, TableRow, LinearProgress, Divider,
@@ -79,7 +79,7 @@ const Dashboard = () => {
     load();
   }, [load]);
 
-  if (loading && !data) return <Typography sx={{ p: 3 }}>Loading DoSJE SmartInspect Command Center...</Typography>;
+  if (loading && !data) return <Typography sx={{ p: 3 }}>{error || 'Loading Samaj Drishti Command Center…'}</Typography>;
 
   if (error && !data) {
     return (
@@ -116,19 +116,19 @@ const Dashboard = () => {
   ];
 
   return (
-    <Box>
+    <Box sx={{ maxWidth: 1600, mx: 'auto' }}>
       {/* Portal Header */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2.5, flexWrap: 'wrap', gap: 1.5 }}>
         <Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
             <Chip label="SIH 2026 · PS-26095" size="small" color="primary" sx={{ fontWeight: 700 }} />
-            <Chip label="DoSJE SmartInspect · Team SamajDrishti (120749)" size="small" sx={{ fontWeight: 600, bgcolor: '#f1f5f9' }} />
+            <Chip label="Samaj Drishti · DoSJE Smart Monitoring (120749)" size="small" sx={{ fontWeight: 600, bgcolor: '#f1f5f9' }} />
           </Box>
-          <Typography variant="h4" sx={{ fontWeight: 800, color: '#0f172a' }}>
-            National Monitoring Command Center
+          <Typography variant="h4" sx={{ fontWeight: 800, color: '#101828' }}>
+            Command Center
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            DoSJE SmartInspect — AI-Powered Real-Time Monitoring &amp; Random Inspection System for Transparent Governance
+            Live oversight of facilities, inspections, evidence, and AI-generated risk signals.
           </Typography>
         </Box>
         <Stack direction="row" spacing={1} alignItems="center">
@@ -175,26 +175,6 @@ const Dashboard = () => {
                 {m.label}
               </Typography>
               <Typography variant="caption" sx={{ color: '#64748b', fontSize: 10, display: 'block', lineHeight: 1.25 }}>{m.sub}</Typography>
-            </Grid>
-          ))}
-        </Grid>
-      </Paper>
-
-      {/* Measurable Outcomes Bar (Slide 2 & 5) */}
-      <Paper sx={{ p: 2, mb: 3, background: 'linear-gradient(135deg, #1e293b, #0f172a)', color: '#f8fafc' }}>
-        <Grid container spacing={2}>
-          {[
-            { metric: '⚡ 40% Faster', label: 'Inspection Response Time', sub: 'Instant mobile notification' },
-            { metric: '🎯 92% Accuracy', label: 'Proxy Attendance Detection', sub: 'Biometric vs CCTV headcount' },
-            { metric: '📉 25-30% Reduction', label: 'Oversight Blindspot Gap', sub: 'Closed via AI random sampling' },
-            { metric: '🔒 100% Immutable', label: 'GIA Grant Audit Trail', sub: 'NavIC locked & encrypted queue' },
-          ].map((item, idx) => (
-            <Grid item xs={6} md={3} key={idx}>
-              <Box sx={{ borderLeft: idx !== 0 ? '1px solid #334155' : 'none', pl: idx !== 0 ? 2 : 0 }}>
-                <Typography variant="h6" sx={{ fontWeight: 700, color: '#38bdf8' }}>{item.metric}</Typography>
-                <Typography variant="body2" sx={{ fontWeight: 600, color: '#f1f5f9', fontSize: 13 }}>{item.label}</Typography>
-                <Typography variant="caption" sx={{ color: '#94a3b8' }}>{item.sub}</Typography>
-              </Box>
             </Grid>
           ))}
         </Grid>

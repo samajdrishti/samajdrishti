@@ -9,8 +9,9 @@ import {
   StopCircleOutlined as StopIcon,
 } from '@mui/icons-material';
 import { adminAPI, monitoringAPI, vcAPI } from '../services/api';
+import AuthSnapshot from '../components/AuthSnapshot';
 
-const REFRESH_MS = 4000;
+const REFRESH_MS = 10000;
 const severityColor = { high: 'error', medium: 'warning', low: 'default' };
 
 const LiveMonitoring = () => {
@@ -41,24 +42,14 @@ const LiveMonitoring = () => {
     load();
   }, [load]);
 
-  // Refresh the live frames
+  // One heartbeat drives both the overview refresh and the frame tick.
   useEffect(() => {
-    const timer = setInterval(() => setTick((v) => v + 1), REFRESH_MS);
+    const timer = setInterval(() => {
+      setTick((v) => v + 1);
+      load();
+    }, REFRESH_MS);
     return () => clearInterval(timer);
-  }, []);
-
-  // Camera health heartbeat
-  useEffect(() => {
-    const timer = setInterval(async () => {
-      try {
-        const { data } = await monitoringAPI.overview();
-        setOverview(data);
-      } catch (err) {
-        /* keep the last good snapshot */
-      }
-    }, 10000);
-    return () => clearInterval(timer);
-  }, []);
+  }, [load]);
 
   const generateNarrative = async (selectedTone) => {
     setBusy('narrative');
@@ -232,10 +223,9 @@ const LiveMonitoring = () => {
             <Paper sx={{ overflow: 'hidden', bgcolor: '#0b1220', color: '#e2e8f0' }}>
               <Box sx={{ position: 'relative', aspectRatio: '16 / 9', bgcolor: '#020617' }}>
                 {camera.online ? (
-                  <Box
-                    component="img"
-                    key={tick}
-                    src={monitoringAPI.snapshotUrl(camera.id)}
+                  <AuthSnapshot
+                    cameraId={camera.id}
+                    refreshKey={tick}
                     alt={`${camera.name} live feed`}
                     sx={{
                       width: '100%',

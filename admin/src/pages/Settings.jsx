@@ -3,9 +3,9 @@ import {
   Box, Typography, Paper, Switch, FormControlLabel, TextField, Button, Divider,
   Chip, Alert, Stack, CircularProgress,
 } from '@mui/material';
-import { adminAPI } from '../services/api';
+import { adminAPI, resolveApiUrl } from '../services/api';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+const API_URL = resolveApiUrl();
 
 const Settings = () => {
   const [status, setStatus] = useState(null);

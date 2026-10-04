@@ -5,19 +5,22 @@ import App from './App';
 import { AuthProvider } from './context/AuthContext';
 import { RealtimeProvider } from './services/realtime';
 import { InspectionProvider } from './context/InspectionContext';
+import { LanguageProvider } from './context/LanguageContext';
 import './styles.css';
 import './ui.css';
 
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <BrowserRouter>
-      <RealtimeProvider>
-        <AuthProvider>
+      <AuthProvider>
+        <RealtimeProvider>
           <InspectionProvider>
-            <App />
+            <LanguageProvider>
+              <App />
+            </LanguageProvider>
           </InspectionProvider>
-        </AuthProvider>
-      </RealtimeProvider>
+        </RealtimeProvider>
+      </AuthProvider>
     </BrowserRouter>
   </React.StrictMode>
 );

@@ -1,4 +1,3 @@
-import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useInspection, CHECKLIST_ITEMS } from '../context/InspectionContext';
 import { TopBar, Panel, KV, Timeline, Chip, Bar, Note } from '../components/ui';
@@ -90,6 +89,9 @@ const Summary = () => {
         <div className="g-btn-row">
           <button className="g-btn g-btn-quiet" onClick={() => navigate('/evidence')}>
             VIEW EVIDENCE
+          </button>
+          <button className="g-btn g-btn-quiet" onClick={() => navigate('/report')}>
+            FULL REPORT
           </button>
           <button className="g-btn g-btn-primary" onClick={() => navigate('/submit')} disabled={!s.gps?.verified}>
             SUBMIT REPORT

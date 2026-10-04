@@ -450,6 +450,32 @@ class ApiContractTest {
                 .andExpect(jsonPath("$.last_updated").exists());
     }
 
+    @Test
+    @DisplayName("GET /gis/centers plots every center with its head, headcount and live cameras")
+    void gisCenters() throws Exception {
+        mvc.perform(get("/api/gis/centers").header("Authorization", bearer(adminToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.centers").isArray())
+                .andExpect(jsonPath("$.centers[0]").exists())
+                .andExpect(jsonPath("$.count").exists())
+                .andExpect(jsonPath("$.centers[0].name").exists())
+                .andExpect(jsonPath("$.centers[0].scheme").exists())
+                .andExpect(jsonPath("$.centers[0].geo_coords.lat").exists())
+                .andExpect(jsonPath("$.centers[0].geo_coords.lng").exists())
+                .andExpect(jsonPath("$.centers[0].head.name").exists())
+                .andExpect(jsonPath("$.centers[0].sanctioned_capacity").exists())
+                .andExpect(jsonPath("$.centers[0].cameras").isArray())
+                .andExpect(jsonPath("$.centers[0].camera_count").exists())
+                .andExpect(jsonPath("$.map.provider").exists());
+    }
+
+    @Test
+    @DisplayName("GET /gis/centers needs a token like every other back-office read")
+    void gisCentersRequiresAToken() throws Exception {
+        mvc.perform(get("/api/gis/centers"))
+                .andExpect(status().isUnauthorized());
+    }
+
     // --------------------------------------------------------------- attendance
 
     @Test

@@ -18,7 +18,7 @@ import {
   BusinessOutlined as BusinessIcon,
   Settings as SettingsIcon,
   Logout as LogoutIcon,
-  Map as MapIcon,
+  Map as MapIcon, ShieldOutlined as ShieldIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 
@@ -46,7 +46,7 @@ const footerLinks = [
 
 const roleColors = { admin: 'error', supervisor: 'warning', official: 'info' };
 
-const Sidebar = ({ user, onLogout }) => {
+const Sidebar = ({ user, onLogout, mobile = false, open = false, onClose }) => {
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -56,7 +56,9 @@ const Sidebar = ({ user, onLogout }) => {
 
   return (
     <Drawer
-      variant="permanent"
+      variant={mobile ? 'temporary' : 'permanent'}
+      open={mobile ? open : true}
+      onClose={onClose}
       sx={{
         width: 250,
         flexShrink: 0,
@@ -65,17 +67,17 @@ const Sidebar = ({ user, onLogout }) => {
           boxSizing: 'border-box',
           display: 'flex',
           flexDirection: 'column',
-          bgcolor: '#0f233f',
+          bgcolor: '#101828',
           color: '#dbe7f5',
         },
       }}
     >
       <Toolbar sx={{ flexDirection: 'column', alignItems: 'stretch', p: '0 8px', minHeight: 72 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, my: 'auto' }}>
-          <Box sx={{ fontSize: 24, lineHeight: 1 }}>🛡️</Box>
+          <ShieldIcon sx={{ fontSize: 28, color: '#84adff' }} />
           <Box>
             <Typography sx={{ fontWeight: 800, fontSize: 15.5, color: '#fff', letterSpacing: 0.2 }}>
-              DoSJE SmartInspect
+              Samaj Drishti
             </Typography>
             <Typography sx={{ fontSize: 10.5, color: '#8fb3dc', letterSpacing: 0.4, textTransform: 'uppercase' }}>
               National Monitoring<br />Command Center
@@ -89,7 +91,7 @@ const Sidebar = ({ user, onLogout }) => {
           {menuItems.map((item) => (
             <ListItemButton
               key={item.path}
-              onClick={() => navigate(item.path)}
+              onClick={() => { navigate(item.path); onClose?.(); }}
               selected={isSelected(item.path)}
               sx={{
                 borderRadius: 1.5,
@@ -114,7 +116,7 @@ const Sidebar = ({ user, onLogout }) => {
           {footerLinks.map((item) => (
             <ListItemButton
               key={item.path}
-              onClick={() => navigate(item.path)}
+              onClick={() => { navigate(item.path); onClose?.(); }}
               selected={location.pathname === item.path}
               sx={{ borderRadius: 1.5, my: 0.25, color: '#bcd0e8', '&:hover': { bgcolor: 'rgba(91, 150, 216, 0.18)' } }}
             >

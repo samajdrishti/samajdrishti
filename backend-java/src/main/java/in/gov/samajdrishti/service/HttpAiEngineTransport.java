@@ -35,10 +35,12 @@ public class HttpAiEngineTransport implements AiEngineTransport {
     private final HttpClient http;
     private final ObjectMapper json;
     private final String baseUrl;
+    private final String apiKey;
 
     public HttpAiEngineTransport(ObjectMapper json, AppProperties properties) {
         this.json = json;
         this.baseUrl = properties.aiEngine().baseUrl();
+        this.apiKey = properties.aiEngine().apiKey();
         this.http = HttpClient.newBuilder()
                 .connectTimeout(properties.aiEngine().healthTimeout())
                 .followRedirects(HttpClient.Redirect.NORMAL)
@@ -59,10 +61,14 @@ public class HttpAiEngineTransport implements AiEngineTransport {
         }
 
         try {
-            HttpRequest request = HttpRequest.newBuilder(endpoint(path))
+            HttpRequest.Builder builder = HttpRequest.newBuilder(endpoint(path))
                     .timeout(timeout)
                     .header("Accept", "application/json")
-                    .header("Content-Type", "application/json")
+                    .header("Content-Type", "application/json");
+            if (apiKey != null && !apiKey.isBlank()) {
+                builder.header("X-API-Key", apiKey);
+            }
+            HttpRequest request = builder
                     .POST(HttpRequest.BodyPublishers.ofByteArray(payload))
                     .build();
             return decode(send(request, path));
@@ -79,9 +85,13 @@ public class HttpAiEngineTransport implements AiEngineTransport {
     @Override
     public Map<String, Object> get(String path, Duration timeout) {
         try {
-            HttpRequest request = HttpRequest.newBuilder(endpoint(path))
+            HttpRequest.Builder builder = HttpRequest.newBuilder(endpoint(path))
                     .timeout(timeout)
-                    .header("Accept", "application/json")
+                    .header("Accept", "application/json");
+            if (apiKey != null && !apiKey.isBlank()) {
+                builder.header("X-API-Key", apiKey);
+            }
+            HttpRequest request = builder
                     .GET()
                     .build();
             return decode(send(request, path));

@@ -151,6 +151,14 @@ public class EvidenceService {
 
         Map<String, Object> verification = verifyAgainstSite(inspection, lat, lng);
 
+        // Integrity chain: link this capture to the previous hash for this inspection
+        String previousHash = evidence.findByInspectionIdOrderByIdAsc(inspectionId)
+                .stream()
+                .filter(e -> e.getFileHash() != null && !e.getFileHash().isBlank())
+                .reduce((firstItem, secondItem) -> secondItem)
+                .map(Evidence::getFileHash)
+                .orElse(null);
+
         Evidence record = new Evidence();
         record.setInspectionId(inspectionId);
         record.setUploadedBy(actor == null ? null : actor.id());
@@ -163,6 +171,8 @@ public class EvidenceService {
         record.setAccuracy(accuracy);
         record.setTimestamp(parseTimestamp(timestamp));
         record.setFileHash(hash);
+        record.setPreviousHash(previousHash);
+        record.setIntegrityStatus(hash != null ? "hashed" : "unverified");
         record.setClientId(normalisedClientId);
         record.setSyncStatus(syncStatus == null || syncStatus.isBlank() ? "synced" : syncStatus);
         record.setCreatedAt(Instant.now());
@@ -201,6 +211,16 @@ public class EvidenceService {
         result.put("evidence_id", saved.getId());
         result.put("geo_verification", verification);
         result.put("duplicate", false);
+
+        Map<String, Object> integrityMap = new LinkedHashMap<>();
+        integrityMap.put("status", hash != null ? "hashed" : "unverified");
+        integrityMap.put("sha256", hash != null ? hash : "");
+        integrityMap.put("previous_hash", previousHash != null ? previousHash : "");
+        integrityMap.put("chain_length", evidence.countByInspectionId(inspectionId));
+        result.put("integrity", integrityMap);
+        result.put("previous_hash", previousHash);
+        result.put("sha256_hash", hash);
+        result.put("mime_type", saved.getContentType());
         return result;
     }
 
@@ -222,14 +242,21 @@ public class EvidenceService {
         body.put("file_path", record.getFilePath());
         body.put("file_name", record.getFileName());
         body.put("content_type", record.getContentType());
+        body.put("mime_type", record.getContentType());
         body.put("file_size", record.getFileSize());
         body.put("geo_coords", record.getGeoCoords());
         body.put("accuracy", record.getAccuracy());
         body.put("timestamp", record.getTimestamp());
         body.put("file_hash", record.getFileHash());
+        body.put("sha256_hash", record.getFileHash());
+        body.put("previous_hash", record.getPreviousHash());
+        body.put("integrity_status", record.getIntegrityStatus());
+        body.put("hash_verified", record.getHashVerified());
         body.put("client_id", record.getClientId());
         body.put("sync_status", record.getSyncStatus());
         body.put("verified", record.isVerified());
+        body.put("verified_by", record.getVerifiedBy());
+        body.put("verified_at", record.getVerifiedAt());
         body.put("created_at", record.getCreatedAt());
         return body;
     }
@@ -241,17 +268,154 @@ public class EvidenceService {
                 : evidence.findByInspectionIdOrderByCreatedAtDesc(inspectionId);
     }
 
-    @Transactional
-    public Evidence verify(Integer id, AuthPrincipal actor) {
+    @Transactional(readOnly = true)
+    public Map<String, Object> checkIntegrity(Integer id) {
         Evidence record = evidence.findById(id)
                 .orElseThrow(() -> ApiException.notFound("Evidence not found"));
-        record.setVerified(true);
-        record.setVerifiedBy(actor == null ? null : actor.id());
-        record.setVerifiedAt(Instant.now());
+        return checkIntegrity(record);
+    }
+
+    public Map<String, Object> checkIntegrity(Evidence record) {
+        Map<String, Object> result = flatten(record);
+        Map<String, Object> integrity = new LinkedHashMap<>();
+
+        if (record.getFileHash() == null || record.getFileHash().isBlank()) {
+            integrity.put("status", "unverified");
+            integrity.put("file_match", false);
+            integrity.put("chain_ok", true);
+            integrity.put("explanation", "No integrity hash was recorded for this item (it predates the chain).");
+            result.put("integrity", integrity);
+            return result;
+        }
+
+        Path file = resolveFilePath(record.getFilePath());
+        String actualHash = null;
+        if (file != null && Files.exists(file)) {
+            try {
+                byte[] bytes = Files.readAllBytes(file);
+                MessageDigest digest = sha256();
+                actualHash = hex(digest.digest(bytes));
+            } catch (Exception e) {
+                // file read error
+            }
+        }
+
+        if (actualHash == null) {
+            integrity.put("status", "missing_file");
+            integrity.put("file_match", false);
+            integrity.put("chain_ok", true);
+            integrity.put("expected_hash", record.getFileHash());
+            integrity.put("actual_hash", null);
+            integrity.put("explanation", "The stored file could not be read - it was moved or deleted after upload.");
+            result.put("integrity", integrity);
+            return result;
+        }
+
+        boolean fileMatch = actualHash.equalsIgnoreCase(record.getFileHash());
+
+        List<Evidence> chain = evidence.findByInspectionIdOrderByIdAsc(record.getInspectionId());
+        boolean chainOk = true;
+        String lastSeenHash = null;
+        for (Evidence curr : chain) {
+            if (curr.getFileHash() == null || curr.getFileHash().isBlank()) {
+                continue;
+            }
+            String actualPrevious = curr.getPreviousHash();
+            if (lastSeenHash == null) {
+                if (actualPrevious != null && !actualPrevious.isBlank()) {
+                    chainOk = false;
+                    break;
+                }
+            } else {
+                if (!lastSeenHash.equalsIgnoreCase(actualPrevious)) {
+                    chainOk = false;
+                    break;
+                }
+            }
+            lastSeenHash = curr.getFileHash();
+        }
+
+        boolean ok = fileMatch && chainOk;
+        integrity.put("status", ok ? "verified" : "tampered");
+        integrity.put("file_match", fileMatch);
+        integrity.put("chain_ok", chainOk);
+        integrity.put("expected_hash", record.getFileHash());
+        integrity.put("actual_hash", actualHash);
+        integrity.put("chain_length", chain.size());
+        integrity.put("checked_at", Instant.now().toString());
+        integrity.put("explanation", !fileMatch
+                ? "The stored file no longer matches the hash taken at upload - the artefact was altered after submission."
+                : (chainOk
+                        ? "File hash matches the hash taken at upload and every chain link is intact."
+                        : "The file is unchanged but a chain link is broken - evidence may have been added or removed."));
+
+        result.put("integrity", integrity);
+        return result;
+    }
+
+    @Transactional
+    public Map<String, Object> verify(Integer id, AuthPrincipal actor) {
+        Evidence record = evidence.findById(id)
+                .orElseThrow(() -> ApiException.notFound("Evidence not found"));
+
+        Map<String, Object> check = checkIntegrity(record);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> integrity = (Map<String, Object>) check.get("integrity");
+        String status = String.valueOf(integrity.get("status"));
+        boolean ok = "verified".equals(status);
+
+        record.setVerified(ok);
+        record.setIntegrityStatus(status);
+        record.setHashVerified(Boolean.TRUE.equals(integrity.get("file_match")));
+        if (ok) {
+            record.setVerifiedBy(actor == null ? null : actor.id());
+            record.setVerifiedAt(Instant.now());
+            audit.record(actor, "evidence.verified", "evidence", id,
+                    Map.of("inspection_id", String.valueOf(record.getInspectionId())));
+        } else {
+            record.setVerifiedBy(null);
+            record.setVerifiedAt(null);
+            audit.record(actor, "evidence.integrity_failed", "evidence", id,
+                    Map.of("inspection_id", String.valueOf(record.getInspectionId()),
+                            "status", status,
+                            "expected_hash", String.valueOf(integrity.get("expected_hash")),
+                            "actual_hash", String.valueOf(integrity.get("actual_hash"))));
+            hub.emit("alert", Map.of(
+                    "severity", "high",
+                    "message", "Evidence #" + id + " failed integrity check (" + status.replace('_', ' ') + ")",
+                    "meta", Map.of("evidence_id", id, "status", status)
+            ));
+        }
         Evidence saved = evidence.save(record);
-        audit.record(actor, "evidence.verified", "evidence", id,
-                Map.of("inspection_id", String.valueOf(saved.getInspectionId())));
-        return saved;
+        Map<String, Object> result = flatten(saved);
+        result.put("integrity", integrity);
+        return result;
+    }
+
+    public Path resolveFilePath(String filePath) {
+        if (filePath == null || filePath.isBlank()) {
+            return null;
+        }
+        String clean = filePath.replace('\\', '/').replaceAll("^/+", "");
+        if (clean.startsWith("uploads/evidence/")) {
+            clean = clean.substring("uploads/evidence/".length());
+        } else if (clean.startsWith("uploads/")) {
+            clean = clean.substring("uploads/".length());
+        }
+
+        List<Path> candidates = List.of(
+                Path.of(properties.uploads().evidenceDir()).toAbsolutePath().normalize().resolve(clean),
+                Path.of("uploads/evidence").toAbsolutePath().normalize().resolve(clean),
+                Path.of("backend-java/uploads/evidence").toAbsolutePath().normalize().resolve(clean),
+                Path.of("../backend-java/uploads/evidence").toAbsolutePath().normalize().resolve(clean),
+                Path.of(filePath).toAbsolutePath().normalize()
+        );
+        for (Path p : candidates) {
+            if (Files.exists(p)) {
+                return p;
+            }
+        }
+        return candidates.get(0);
     }
 
     /**
@@ -367,8 +531,12 @@ public class EvidenceService {
     }
 
     private static String hex(MessageDigest digest) {
-        StringBuilder out = new StringBuilder(64);
-        for (byte b : digest.digest()) {
+        return hex(digest.digest());
+    }
+
+    private static String hex(byte[] bytes) {
+        StringBuilder out = new StringBuilder(bytes.length * 2);
+        for (byte b : bytes) {
             out.append(Character.forDigit((b >> 4) & 0xF, 16));
             out.append(Character.forDigit(b & 0xF, 16));
         }

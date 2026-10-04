@@ -11,6 +11,8 @@ public interface EvidenceRepository extends JpaRepository<Evidence, Integer> {
 
     List<Evidence> findByInspectionIdOrderByCreatedAtDesc(Integer inspectionId);
 
+    List<Evidence> findByInspectionIdOrderByIdAsc(Integer inspectionId);
+
     List<Evidence> findByInspectionIdInOrderByCreatedAtDesc(List<Integer> inspectionIds);
 
     List<Evidence> findAllByOrderByCreatedAtDesc();

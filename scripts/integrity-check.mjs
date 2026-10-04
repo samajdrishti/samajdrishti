@@ -15,9 +15,14 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const API = (process.env.API_URL || 'http://localhost:5000/api').replace(/\/$/, '');
-const UPLOADS = path.resolve('backend/uploads');
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const UPLOADS = path.resolve(HERE, '..', 'backend', 'uploads');
+// Maps an API file path (/uploads/evidence/<file>) to its on-disk location.
+const absolutePathOf = (filePath) =>
+  path.join(UPLOADS, String(filePath || '').replace(/^\/uploads\//, '').split('/').join(path.sep));
 
 let pass = 0;
 const failures = [];
@@ -66,9 +71,17 @@ const PNG = Buffer.from(
   'base64'
 );
 
-const upload = async (token, inspectionId, name) => {
+/**
+ * Unique bytes per capture. Both twins treat identical bytes on the same inspection as a
+ * duplicate, and this proof exists to append a fresh pair on every run - so each upload
+ * carries a nonce. (Trailing bytes after the PNG terminator are ignored by image viewers.)
+ */
+const imageFor = (tag) =>
+  Buffer.concat([PNG, Buffer.from(`\n# integrity-check ${tag} ${Date.now()} ${Math.random()}\n`)]);
+
+const upload = async (token, inspectionId, name, bytes = imageFor(name)) => {
   const form = new FormData();
-  form.append('file', new Blob([PNG], { type: 'image/png' }), name);
+  form.append('file', new Blob([bytes], { type: 'image/png' }), name);
   form.append('inspection_id', String(inspectionId));
   form.append('type', 'photo');
   form.append('lat', '28.8955');
@@ -79,11 +92,32 @@ const upload = async (token, inspectionId, name) => {
 
 // `/uploads/...` is API-relative, NOT absolute: on Windows a leading slash is
 // "rooted" on the current drive, so `path.isAbsolute` would resolve it to
-// C:\uploads\... Detect a real absolute path by drive letter / UNC instead.
-const absolutePathOf = (filePath) =>
-  /^[a-zA-Z]:[\\/]/.test(filePath) || filePath.startsWith('\\\\')
-    ? filePath
-    : path.join(UPLOADS, filePath.replace(/^[\\/]+/, '').replace(/^uploads[\\/]/, ''));
+// C:\uploads\... Detect a real absolute path by drive letter / UNC instead, and
+// look under whichever backend is running (Node writes to backend/uploads, the
+// Java twin to backend-java/uploads).
+const UPLOAD_ROOTS = [
+  path.resolve('backend/uploads'),
+  path.resolve('backend-java/uploads'),
+  path.resolve('uploads'),
+];
+
+const candidatePathsOf = (filePath) => {
+  if (/^[a-zA-Z]:[\\/]/.test(filePath) || filePath.startsWith('\\\\')) {
+    return [filePath];
+  }
+  const relative = filePath.replace(/^[\\/]+/, '').replace(/^uploads[\\/]/, '');
+  return UPLOAD_ROOTS.map((root) => path.join(root, relative));
+};
+
+/** The stored artefact, wherever the running backend keeps its uploads. */
+const storedFileOf = (filePath) => {
+  const candidates = candidatePathsOf(filePath);
+  const found = candidates.find((candidate) => fs.existsSync(candidate));
+  if (!found) {
+    throw new Error(`stored file not found for ${filePath}; looked in ${candidates.join(', ')}`);
+  }
+  return found;
+};
 
 async function main() {
   console.log(`Samaj Drishti evidence-integrity proof\n  API ${API}`);
@@ -140,7 +174,7 @@ async function main() {
 
   // ------------------------------------------------------------- tampering
   section('Tamper detection');
-  const file = absolutePathOf(first.data.file_path);
+  const file = storedFileOf(first.data.file_path);
   const original = fs.readFileSync(file);
   fs.writeFileSync(file, Buffer.concat([original, Buffer.from('TAMPERED-BY-A-THIRD-PARTY')]));
   ok('the stored file was altered on disk', fs.readFileSync(file).length !== original.length, file);

@@ -1,5 +1,5 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { authAPI, clearSession, getStoredUser, getToken, isAuthenticated, saveSession } from '../services/api';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { authAPI, clearSession, getStoredUser, getToken, isAuthenticated, saveSession, setUnauthorizedHandler } from '../services/api';
 
 const AuthContext = createContext(null);
 
@@ -49,6 +49,16 @@ export const AuthProvider = ({ children }) => {
     clearSession();
     setUser(null);
     setToken(null);
+  }, []);
+
+  // A 401 anywhere (expired/revoked token) must drop the React session too,
+  // otherwise the app stays "logged in" with a dead token until reload.
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      setUser(null);
+      setToken(null);
+    });
+    return () => setUnauthorizedHandler(null);
   }, []);
 
   const value = useMemo(

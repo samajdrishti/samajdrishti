@@ -1,12 +1,14 @@
 package in.gov.samajdrishti.security;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletResponse;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.MediaType;
@@ -29,6 +31,11 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
  * feedback channel (submitting feedback has to work for people who are not officials)
  * and the CCTV snapshot image.
  *
+ * <p>Uploaded evidence artefacts under {@code /uploads/**} are served by
+ * {@code UploadsResourceConfig} and require authentication - either a bearer token or,
+ * for the {@code <img>} tags and {@code window.open} calls that cannot send a header,
+ * the {@code ?token=} query parameter honoured by {@link JwtAuthFilter}.
+ *
  * <p>Everything else needs a valid bearer token, and the back-office routes
  * additionally carry {@code @PreAuthorize("hasAnyRole('ADMIN','SUPERVISOR')")} on the
  * controller method, which replaces the Node {@code roleCheck('admin','supervisor')} guard.
@@ -39,10 +46,16 @@ public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
     private final ObjectMapper objectMapper;
+    private final List<String> corsOrigins;
 
-    public SecurityConfig(JwtAuthFilter jwtAuthFilter, ObjectMapper objectMapper) {
+    public SecurityConfig(JwtAuthFilter jwtAuthFilter, ObjectMapper objectMapper,
+                          @Value("${CORS_ORIGINS:http://localhost:5173,http://localhost:5174}") String corsOrigins) {
         this.jwtAuthFilter = jwtAuthFilter;
         this.objectMapper = objectMapper;
+        this.corsOrigins = Arrays.stream(corsOrigins.split(","))
+                .map(String::strip)
+                .filter(origin -> !origin.isEmpty())
+                .toList();
     }
 
     @Bean
@@ -61,7 +74,7 @@ public class SecurityConfig {
                                 "/api/auth/login", "/api/auth/register",
                                 "/api/beneficiaries/feedback",
                                 "/api/monitoring/cameras/*/snapshot",
-                                "/uploads/**", "/error")
+                                "/error")
                         .permitAll()
                         .anyRequest().authenticated())
                 .exceptionHandling(handling -> handling
@@ -75,10 +88,20 @@ public class SecurityConfig {
         return http.build();
     }
 
+    /**
+     * CORS for the two shipped clients. The origins come from {@code CORS_ORIGINS}
+     * (comma-separated, as passed by docker-compose) so a deployment never serves
+     * a browser request from an origin nobody asked for. {@code *} is honoured as
+     * an explicit opt-out for local development only.
+     */
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOriginPatterns(List.of("*"));
+        if (corsOrigins.size() == 1 && "*".equals(corsOrigins.get(0))) {
+            configuration.setAllowedOriginPatterns(List.of("*"));
+        } else {
+            configuration.setAllowedOrigins(corsOrigins);
+        }
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("*"));
         configuration.setExposedHeaders(List.of("X-Stream-Source"));

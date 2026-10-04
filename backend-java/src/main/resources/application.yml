@@ -36,6 +36,7 @@ app:
     base-url: ${AI_ENGINE_URL:http://localhost:5001}
     health-timeout-ms: ${AI_HEALTH_TIMEOUT_MS:3000}
     default-timeout-ms: ${AI_TIMEOUT_MS:15000}
+    api-key: ${AI_ENGINE_API_KEY:}
   vc:
     base-url: ${VC_BASE_URL:https://meet.jit.si}
   uploads:

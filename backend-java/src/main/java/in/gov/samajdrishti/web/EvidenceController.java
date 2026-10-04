@@ -89,13 +89,22 @@ public class EvidenceController {
 
     @GetMapping
     @Transactional(readOnly = true)
-    public List<Evidence> list(@RequestParam(required = false) Integer inspectionId) {
-        return evidence.list(inspectionId);
+    public List<Evidence> list(
+            @RequestParam(value = "inspection_id", required = false) Integer inspectionIdParam,
+            @RequestParam(value = "inspectionId", required = false) Integer inspectionIdAlt) {
+        Integer id = inspectionIdParam != null ? inspectionIdParam : inspectionIdAlt;
+        return evidence.list(id);
+    }
+
+    @GetMapping("/{id}/integrity")
+    @PreAuthorize("hasAnyRole('ADMIN','SUPERVISOR')")
+    public Map<String, Object> integrity(@PathVariable Integer id) {
+        return evidence.checkIntegrity(id);
     }
 
     @PutMapping("/{id}/verify")
     @PreAuthorize("hasAnyRole('ADMIN','SUPERVISOR')")
-    public Evidence verify(@PathVariable Integer id, @AuthenticationPrincipal AuthPrincipal current) {
+    public Map<String, Object> verify(@PathVariable Integer id, @AuthenticationPrincipal AuthPrincipal current) {
         return evidence.verify(id, current);
     }
 

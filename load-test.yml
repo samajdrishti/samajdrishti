@@ -1,0 +1,47 @@
+events:
+  vus: 100
+  duration: 120
+  rampUp: 10
+  rampDown: 10
+
+scenarios:
+  - name: full-workflow
+    weight: 1
+    flow:
+      - post:
+          url: "/api/auth/login"
+          json:
+            email: "admin@samajdrishti.gov.in"
+            password: "Admin@123"
+          capture:
+            token: "$.token"
+      - get:
+          url: "/api/admin/dashboard"
+          headers:
+            Authorization: "Bearer {{token}}"
+      - get:
+          url: "/api/monitoring/overview"
+          headers:
+            Authorization: "Bearer {{token}}"
+      - get:
+          url: "/api/monitoring/cameras"
+          headers:
+            Authorization: "Bearer {{token}}"
+      - get:
+          url: "/api/monitoring/cameras/1/snapshot"
+          headers:
+            Authorization: "Bearer {{token}}"
+      - get:
+          url: "/api/projects"
+          headers:
+            Authorization: "Bearer {{token}}"
+      - get:
+          url: "/api/inspections/mine"
+          headers:
+            Authorization: "Bearer {{token}}"
+      - post:
+          url: "/api/inspections/:id/status"
+          json:
+            status: "completed"
+          headers:
+            Authorization: "Bearer {{token}}"

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useInspection, CHECKLIST_ITEMS } from '../context/InspectionContext';
 import { TopBar, Panel, KV, Note, Chip } from '../components/ui';
@@ -55,6 +55,7 @@ const Submit = () => {
             The web command dashboard has been updated by a live server push — no refresh required. A
             reviewer can open this inspection immediately from the GIS map.
           </Note>
+          <button className="g-btn g-btn-quiet" onClick={() => navigate('/report')}>VIEW / SHARE REPORT</button>
           <button className="g-btn g-btn-primary" onClick={() => navigate('/')}>BACK TO DASHBOARD</button>
         </div>
       </>

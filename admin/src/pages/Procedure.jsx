@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Typography, Paper, Grid, Chip, Stepper, Step, StepLabel, StepContent, Alert, Divider } from '@mui/material';
+import { Box, Typography, Paper, Grid, Chip, Alert, Divider, Button } from '@mui/material';
 import {
   Casino as AssignIcon,
   LocationOn as GpsIcon,
@@ -77,33 +77,60 @@ const Procedure = () => {
         always concluded by the inspecting officer.
       </Alert>
 
-      <Paper sx={{ p: 3 }}>
-        <Stepper orientation="vertical" nonLinear>
-          {STEPS.map((step) => (
-            <Step key={step.title}>
-              <StepLabel
-                StepIconComponent={() => (
-                  <Box sx={{ bgcolor: step.tone, color: '#fff', borderRadius: 2, width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    {step.icon}
-                  </Box>
-                )}
-              >
-                <Typography sx={{ fontWeight: 800, color: step.tone }}>{step.title}</Typography>
-              </StepLabel>
-              <StepContent>
-                <Typography variant="body2" sx={{ color: '#475569', mb: 1.5 }}>{step.body}</Typography>
-              </StepContent>
-            </Step>
+      <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {STEPS.map((step, idx) => (
+            <Paper
+              key={step.title}
+              variant="outlined"
+              sx={{
+                p: 2.5,
+                borderRadius: 2.5,
+                borderColor: 'divider',
+                transition: 'all 0.2s ease-in-out',
+                '&:hover': {
+                  boxShadow: '0 4px 14px rgba(0,0,0,0.06)',
+                  borderColor: step.tone,
+                },
+              }}
+            >
+              <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2 }}>
+                <Box
+                  sx={{
+                    bgcolor: step.tone,
+                    color: '#fff',
+                    borderRadius: 2,
+                    width: 40,
+                    height: 40,
+                    minWidth: 40,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: `0 2px 8px ${step.tone}40`,
+                  }}
+                >
+                  {step.icon}
+                </Box>
+                <Box sx={{ flex: 1 }}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 800, color: step.tone, mb: 0.5 }}>
+                    {step.title}
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#475569', lineHeight: 1.6 }}>
+                    {step.body}
+                  </Typography>
+                </Box>
+              </Box>
+            </Paper>
           ))}
-        </Stepper>
+        </Box>
       </Paper>
 
       <Divider sx={{ my: 3 }} />
 
       <Grid container spacing={2}>
         <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 2, bgcolor: '#f8fafc' }}>
-            <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 1 }}>
+          <Paper sx={{ p: 2.5, bgcolor: '#f8fafc', borderRadius: 2 }}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 1.5, color: '#0f172a' }}>
               Guards built into the process
             </Typography>
             {[
@@ -113,31 +140,35 @@ const Procedure = () => {
               'Evidence hashes are append-only and verifiable later.',
               'Anomalies expire unless an officer confirms or dismisses them.',
             ].map((point) => (
-              <Typography key={point} variant="body2" sx={{ color: '#334155', py: 0.5, display: 'flex', gap: 1 }}>
-                <span style={{ color: '#059669', fontWeight: 800 }}>✓</span>{point}
+              <Typography key={point} variant="body2" sx={{ color: '#334155', py: 0.6, display: 'flex', gap: 1.2, alignItems: 'center' }}>
+                <span style={{ color: '#059669', fontWeight: 800, fontSize: 16 }}>✓</span>
+                {point}
               </Typography>
             ))}
           </Paper>
         </Grid>
         <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 2, bgcolor: '#0f233f', color: '#dbe7f5' }}>
+          <Paper sx={{ p: 2.5, bgcolor: '#0f233f', color: '#dbe7f5', borderRadius: 2 }}>
             <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 1.5, color: '#fff' }}>
               See it working live
             </Typography>
-            <Typography variant="body2" sx={{ color: '#a9c4e2', mb: 1.5 }}>
+            <Typography variant="body2" sx={{ color: '#a9c4e2', mb: 2, lineHeight: 1.6 }}>
               Open the Field Inspections module, pick any row, and inspect the completed dossier — status
-              timeline, geo-verification, evidence vault, checklist and the officer\u2019s AI decisions are all recorded there.
+              timeline, geo-verification, evidence vault, checklist and the officer's AI decisions are all recorded there.
             </Typography>
-            <button
-              type="button"
+            <Button
+              variant="contained"
               onClick={() => navigate('/inspections')}
-              style={{
-                padding: '8px 16px', borderRadius: 8, border: 'none', cursor: 'pointer',
-                background: '#2563eb', color: '#fff', fontWeight: 700, fontSize: 13,
+              sx={{
+                borderRadius: 2,
+                textTransform: 'none',
+                fontWeight: 700,
+                bgcolor: '#2563eb',
+                '&:hover': { bgcolor: '#1d4ed8' },
               }}
             >
               Open Field Inspections →
-            </button>
+            </Button>
           </Paper>
         </Grid>
       </Grid>

@@ -6,12 +6,24 @@ import { SectionTitle, Panel, Empty, Chip, FilterRow, KV, Note } from '../compon
 const FILTERS = ['All', 'Photo', 'Video', 'Document', 'Voice'];
 
 const Evidence = () => {
-  const { session, online } = useInspection();
+  const { session, online, removeEvidence } = useInspection();
   const navigate = useNavigate();
   const [filter, setFilter] = React.useState('All');
   const [open, setOpen] = React.useState(null);
 
+  React.useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
+
   const items = session.evidence.filter((e) => (filter === 'All' ? true : e.kind === filter.toLowerCase()));
+
+  const onDelete = (id) => {
+    removeEvidence(id);
+    setOpen(null);
+  };
 
   return (
     <>
@@ -32,6 +44,12 @@ const Evidence = () => {
       ) : (
         <>
           <FilterRow options={FILTERS} value={filter} onChange={setFilter} />
+
+          {items.length === 0 ? (
+            <Panel>
+              <Empty icon="🔍" title={`No ${filter.toLowerCase()} evidence`} desc="Change the filter or capture a new item." />
+            </Panel>
+          ) : null}
 
           {!online ? (
             <Note tone="warn" icon="⚠">
@@ -72,10 +90,13 @@ const Evidence = () => {
               {open.dataUrl ? <img src={open.dataUrl} alt={open.label} style={{ width: '100%', borderRadius: 10, display: 'block', marginBottom: 10 }} /> : null}
               <KV k="Type" v={open.kind} />
               <KV k="Captured at" v={new Date(open.capturedAt).toLocaleString('en-IN')} mono />
-              <KV k="Coordinates" v={`${open.lat.toFixed(4)}, ${open.lng.toFixed(4)}`} mono />
+              <KV k="Coordinates" v={Number.isFinite(Number(open.lat)) ? `${Number(open.lat).toFixed(4)}, ${Number(open.lng).toFixed(4)}` : '—'} mono />
               <KV k="Geo-tagging" v={<Chip tone="ok" dot>ENABLED</Chip>} />
               <KV k="Integrity" v={open.integrity} mono />
               <KV k="Upload" v={<Chip tone={open.synced ? 'ok' : 'warn'} dot>{open.synced ? 'SYNCED' : 'PENDING UPLOAD'}</Chip>} />
+              <button type="button" className="g-btn g-btn-quiet g-btn-sm mt" onClick={() => onDelete(open.id)}>
+                Delete this item
+              </button>
             </Panel>
           ) : null}
         </>

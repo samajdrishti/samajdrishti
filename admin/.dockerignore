@@ -1,0 +1,12 @@
+# Admin Frontend
+node_modules/
+dist/
+build/
+.vite/
+.cache/
+*.html
+.env*
+.git/
+.github/
+.DS_Store
+Thumbs.db

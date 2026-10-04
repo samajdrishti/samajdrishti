@@ -45,7 +45,9 @@ public class AuthController {
         user.setName(body.name());
         user.setEmail(body.email());
         user.setPassword(passwordEncoder.encode(body.password()));
-        user.setRole(ROLES.contains(body.role()) ? body.role() : "official");
+        // Self-registration always yields the least-privileged field role;
+        // admin/supervisor accounts can only be minted via an admin tool.
+        user.setRole("official");
         user.setDepartment(body.department());
         user.setPhone(body.phone());
         user.setCreatedAt(java.time.Instant.now());

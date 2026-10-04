@@ -2,10 +2,14 @@ import React, { useState } from 'react';
 import { Box, Paper, Typography, TextField, Button, Alert, Chip, Divider } from '@mui/material';
 import { authAPI, saveSession } from '../services/api';
 
-const DEMO_ACCOUNTS = [
-  { label: 'Admin', email: 'admin@samajdrishti.gov.in', password: 'Admin@123' },
-  { label: 'Supervisor', email: 'supervisor@samajdrishti.gov.in', password: 'Super@123' },
-];
+// Demo shortcuts are a development convenience only - never ship credentials
+// in a production bundle.
+const DEMO_ACCOUNTS = import.meta.env.DEV
+  ? [
+      { label: 'Admin', email: 'admin@samajdrishti.gov.in', password: 'Admin@123' },
+      { label: 'Supervisor', email: 'supervisor@samajdrishti.gov.in', password: 'Super@123' },
+    ]
+  : [];
 
 const Login = ({ onAuthenticated }) => {
   const [email, setEmail] = useState('');
@@ -59,8 +63,11 @@ const Login = ({ onAuthenticated }) => {
       <Paper sx={{ p: 4, width: '100%', maxWidth: 460, borderRadius: 3 }} elevation={8}>
         <Box sx={{ textAlign: 'center', mb: 2.5 }}>
           <Box sx={{ fontSize: 40, lineHeight: 1 }}>🛡️</Box>
-          <Typography variant="h5" sx={{ fontWeight: 800, mt: 0.5 }}>
-            DoSJE SmartInspect
+          <Typography variant="h5" sx={{ fontWeight: 800, mt: 0.5, letterSpacing: -0.02 }}>
+            Samaj Drishti
+          </Typography>
+          <Typography variant="h6" sx={{ fontWeight: 500, fontSize: '1.1rem', color: '#64748b', mt: 0.5 }}>
+            Command Center
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
             National Monitoring Command Center

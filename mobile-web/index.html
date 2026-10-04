@@ -1,23 +1,19 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no"
-    />
-    <meta name="theme-color" content="#123a63" />
-    <meta name="description" content="DoSJE SmartInspect - real-time monitoring and inspection mobile app for DoSJE schemes, Ministry of Social Justice & Empowerment" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="DoSJE SmartInspect" />
-    <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
-    <link rel="apple-touch-icon" href="/icon.svg" />
-    <title>DoSJE SmartInspect — Field Inspection</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#123a63" />
+  <meta name="description" content="Samaj Drishti field app for officials: geo-tagged inspections, evidence capture, CCTV and random video verification. Shares the same Spring Boot + AI-engine backend as the web dashboard." />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+  <title>Samaj Drishti - Field App (Mobile)</title>
+  <!-- Runtime backend URL (overwritten by docker-entrypoint.sh from $API_URL).
+       Keeps the image portable: no rebuild needed to point at another API. -->
+  <script src="/config.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.jsx"></script>
+</body>
 </html>

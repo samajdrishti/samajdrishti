@@ -73,6 +73,7 @@ public class SocketIoEngineHandler extends TextWebSocketHandler implements SubPr
         // the owner's notification room straight away.
         Integer userId = userIdFromHandshake(session);
         if (userId != null) {
+            session.getAttributes().put("handshakeUserId", userId);
             hub.joinUserRoom(session.getId(), userId);
         }
 
@@ -83,6 +84,28 @@ public class SocketIoEngineHandler extends TextWebSocketHandler implements SubPr
                 "pingTimeout", PING_TIMEOUT_MS,
                 "maxPayload", 1_000_000);
         session.sendMessage(new TextMessage("0" + Json.encode(open)));
+    }
+
+    /** Resolves the caller's identity from the Socket.IO CONNECT payload, falling back to the handshake token. */
+    private Integer authenticateConnect(WebSocketSession session, String rest) {
+        String token = null;
+        if (!rest.isBlank()) {
+            int start = rest.indexOf('{');
+            if (start >= 0) {
+                Object fromBody = Json.decodeMap(rest.substring(start)).get("token");
+                if (fromBody != null) {
+                    token = String.valueOf(fromBody);
+                }
+            }
+        }
+        if (token == null || token.isBlank()) {
+            Object fromHandshake = session.getAttributes().get("handshakeUserId");
+            if (fromHandshake instanceof Integer id) {
+                return id;
+            }
+            return null;
+        }
+        return jwtService.resolveUserId(token).orElse(null);
     }
 
     private Integer userIdFromHandshake(WebSocketSession session) {
@@ -134,6 +157,17 @@ public class SocketIoEngineHandler extends TextWebSocketHandler implements SubPr
 
         // 0 = CONNECT, 2 = EVENT, 3 = ACK, 4 = BINARY_EVENT, 5 = BINARY_ACK
         if (socketIoType == '0') {
+            Integer userId = authenticateConnect(session, rest);
+            if (userId == null) {
+                // The client expects Socket.IO CONNECT_ERROR ("44") with a message it
+                // can match (/unauthorized/i triggers its session-clear path).
+                session.sendMessage(new TextMessage(
+                        "44" + Json.encode(Map.of("message", "unauthorized"))));
+                session.close(CloseStatus.POLICY_VIOLATION);
+                return;
+            }
+            session.getAttributes().put("userId", userId);
+            hub.joinUserRoom(session.getId(), userId);
             String sid = String.valueOf(session.getAttributes().getOrDefault("sid", ""));
             session.sendMessage(new TextMessage("40" + Json.encode(Map.of("sid", sid))));
             return;
@@ -151,8 +185,12 @@ public class SocketIoEngineHandler extends TextWebSocketHandler implements SubPr
             return;
         }
         if ("join".equals(event)) {
-            Integer userId = args.length > 1 ? Json.intOf(args[1]) : null;
-            hub.joinUserRoom(session.getId(), userId);
+            // Never trust a client-supplied room name; the socket only ever joins
+            // the room of the user it authenticated as.
+            Integer authenticated = (Integer) session.getAttributes().get("userId");
+            if (authenticated != null) {
+                hub.joinUserRoom(session.getId(), authenticated);
+            }
             return;
         }
         if ("ping".equals(event)) {

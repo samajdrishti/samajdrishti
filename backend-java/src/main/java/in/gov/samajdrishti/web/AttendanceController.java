@@ -83,26 +83,14 @@ public class AttendanceController {
         Lookups lookups = lookups();
         LocalDate fromDate = parseDate(from);
         LocalDate toDate = parseDate(to);
+        int pageSize = limit == null ? 100 : Math.min(Math.max(1, limit), 500);
 
-        List<Attendance> rows = new ArrayList<>();
-        for (Attendance record : attendance.findAllByOrderByIdDesc()) {
-            if (officialId != null && !officialId.equals(record.getOfficialId())) {
-                continue;
-            }
-            if (projectId != null && !projectId.equals(record.getProjectId())) {
-                continue;
-            }
-            if (fromDate != null && (record.getDate() == null || record.getDate().isBefore(fromDate))) {
-                continue;
-            }
-            if (toDate != null && (record.getDate() == null || record.getDate().isAfter(toDate))) {
-                continue;
-            }
-            rows.add(record);
-            if (rows.size() >= (limit == null ? 100 : Math.min(limit, 500))) {
-                break;
-            }
-        }
+        List<Attendance> rows = attendance.searchAttendance(
+                officialId,
+                projectId,
+                fromDate,
+                toDate,
+                org.springframework.data.domain.PageRequest.of(0, pageSize));
         return rows.stream().map(row -> enrich(row, lookups)).toList();
     }
 

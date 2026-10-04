@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { vcAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 

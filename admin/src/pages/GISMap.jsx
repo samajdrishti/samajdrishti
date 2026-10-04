@@ -14,7 +14,8 @@ import {
   Person as PersonIcon,
   Public as PublicIcon,
 } from '@mui/icons-material';
-import { gisAPI, monitoringAPI, vcAPI } from '../services/api';
+import { gisAPI, vcAPI } from '../services/api';
+import AuthSnapshot from '../components/AuthSnapshot';
 import { useNavigate } from 'react-router-dom';
 
 const SCHEME_BADGES = {
@@ -35,7 +36,8 @@ const statusChipColor = (status) =>
 /* Styling for the pin hover card (used inside a Google InfoWindow and a
    Leaflet tooltip, so it lives in its own class rather than MUI sx). */
 const PIN_CARD_CSS = `
-.sd-pin-card { min-width: 236px; max-width: 268px; font-family: Roboto, 'Segoe UI', sans-serif; color: #0f172a; background: #fff; border-radius: 10px; border: 1px solid #e2e8f0; box-shadow: 0 6px 24px rgba(15, 23, 42, 0.18); padding: 10px 12px; }
+.sd-pin-card { position: relative; min-width: 236px; max-width: 268px; font-family: Roboto, 'Segoe UI', sans-serif; color: #0f172a; background: #fff; border-radius: 10px; border: 1px solid #e2e8f0; box-shadow: 0 6px 24px rgba(15, 23, 42, 0.18); padding: 10px 12px; pointer-events: auto; }
+.sd-pin-card::after { content: ''; position: absolute; left: -16px; right: -16px; bottom: -24px; height: 24px; background: transparent; pointer-events: auto; }
 .sd-pin-card .sd-scheme { display: inline-block; font-size: 10px; font-weight: 800; letter-spacing: 0.4px; padding: 2px 8px; border-radius: 999px; }
 .sd-pin-card .sd-name { font-size: 13px; font-weight: 700; line-height: 1.3; margin: 6px 0 2px; }
 .sd-pin-card .sd-loc { font-size: 11px; color: #64748b; }
@@ -51,7 +53,7 @@ const PIN_CARD_CSS = `
 .sd-pin-card .sd-vc:hover { background: #e0e7ff; }
 .sd-pin-card .sd-vc[disabled] { opacity: 0.65; cursor: wait; }
 .sd-pin-card .sd-hint { font-size: 10px; color: #94a3b8; margin-top: 6px; }
-.leaflet-tooltip.sd-pin-tip { background: transparent; border: none; box-shadow: none; padding: 0; white-space: normal; }
+.leaflet-tooltip.sd-pin-tip { background: transparent; border: none; box-shadow: none; padding: 0; white-space: normal; pointer-events: auto !important; }
 .leaflet-tooltip.sd-pin-tip::before { display: none; }
 `;
 
@@ -66,21 +68,60 @@ const buildPinCard = (center, onVideoCall) => {
   const head = center.head || {};
   const el = document.createElement('div');
   el.className = 'sd-pin-card';
-  el.innerHTML = `
-    <span class="sd-scheme" style="background:${scheme.bg};color:${scheme.color};">${scheme.label}</span>
-    <div class="sd-name">${center.name}</div>
-    <div class="sd-loc">📍 ${center.location || ''}</div>
-    <div class="sd-headbox">
-      <div class="sd-headlabel">Current Head</div>
-      <div class="sd-headname">${head.name || 'Head not on file'}</div>
-      <div class="sd-headdesig">${head.designation || ''}</div>
-    </div>
-    <div class="sd-actions">
-      ${head.phone ? `<a class="sd-btn sd-call" href="tel:${head.phone}">📞 Call</a>` : ''}
-      <button type="button" class="sd-btn sd-vc">🎥 Video call</button>
-    </div>
-    <div class="sd-hint">Click the pin for the full drill-down (CCTV, compliance)</div>`;
-  el.querySelector('.sd-vc').addEventListener('click', (event) => {
+
+  const schemeEl = document.createElement('span');
+  schemeEl.className = 'sd-scheme';
+  schemeEl.style.background = scheme.bg;
+  schemeEl.style.color = scheme.color;
+  schemeEl.textContent = scheme.label;
+  el.appendChild(schemeEl);
+
+  const nameEl = document.createElement('div');
+  nameEl.className = 'sd-name';
+  nameEl.textContent = center.name || '';
+  el.appendChild(nameEl);
+
+  const locEl = document.createElement('div');
+  locEl.className = 'sd-loc';
+  locEl.textContent = `📍 ${center.location || ''}`;
+  el.appendChild(locEl);
+
+  const headBox = document.createElement('div');
+  headBox.className = 'sd-headbox';
+  const headLabel = document.createElement('div');
+  headLabel.className = 'sd-headlabel';
+  headLabel.textContent = 'Current Head';
+  const headName = document.createElement('div');
+  headName.className = 'sd-headname';
+  headName.textContent = head.name || 'Head not on file';
+  const headDesig = document.createElement('div');
+  headDesig.className = 'sd-headdesig';
+  headDesig.textContent = head.designation || '';
+  headBox.append(headLabel, headName, headDesig);
+  el.appendChild(headBox);
+
+  const actions = document.createElement('div');
+  actions.className = 'sd-actions';
+  if (head.phone) {
+    const callBtn = document.createElement('a');
+    callBtn.className = 'sd-btn sd-call';
+    callBtn.href = `tel:${encodeURIComponent(head.phone)}`;
+    callBtn.textContent = '📞 Call';
+    actions.appendChild(callBtn);
+  }
+  const vcBtn = document.createElement('button');
+  vcBtn.type = 'button';
+  vcBtn.className = 'sd-btn sd-vc';
+  vcBtn.textContent = '🎥 Video call';
+  actions.appendChild(vcBtn);
+  el.appendChild(actions);
+
+  const hint = document.createElement('div');
+  hint.className = 'sd-hint';
+  hint.textContent = 'Click the pin for the full drill-down (CCTV, compliance)';
+  el.appendChild(hint);
+
+  vcBtn.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopPropagation();
     onVideoCall(center);
@@ -154,11 +195,16 @@ const GISMap = () => {
   /* ---------------------------------------------------- pin hover cards */
   const hidePinCard = () => {
     if (gRef.current?.info) gRef.current.info.close();
+    if (lRef.current?.layer) {
+      lRef.current.layer.eachLayer((m) => {
+        if (m.closeTooltip) m.closeTooltip();
+      });
+    }
   };
 
   const schedulePinClose = () => {
     clearTimeout(pinTimerRef.current);
-    pinTimerRef.current = setTimeout(hidePinCard, 320);
+    pinTimerRef.current = setTimeout(hidePinCard, 400);
   };
 
   const getPinCard = (center) => {
@@ -300,6 +346,7 @@ const GISMap = () => {
         maxZoom: 19,
         attribution: '&copy; OpenStreetMap contributors',
       }).addTo(map);
+      map.on('click', hidePinCard);
       lRef.current = { map, layer: L.layerGroup().addTo(map), L };
       setLeafletReady(true);
     })();
@@ -336,7 +383,11 @@ const GISMap = () => {
             strokeWeight: 2,
           },
         });
-        marker.addListener('click', () => setActiveId(center.id));
+        marker.addListener('click', () => {
+          clearTimeout(pinTimerRef.current);
+          openPinCard(center, marker);
+          setActiveId(center.id);
+        });
         marker.addListener('mouseover', () => openPinCard(center, marker));
         marker.addListener('mouseout', () => schedulePinClose());
         return marker;
@@ -351,7 +402,7 @@ const GISMap = () => {
       layer.clearLayers();
       filteredCenters.forEach((center) => {
         const selected = center.id === activeCenter.id;
-        L.circleMarker(
+        const marker = L.circleMarker(
           [center.geo_coords?.lat || INDIA_CENTER.lat, center.geo_coords?.lng || INDIA_CENTER.lng],
           {
             radius: selected ? 10 : 7,
@@ -363,13 +414,40 @@ const GISMap = () => {
         )
           .bindTooltip(getPinCard(center), {
             direction: 'top',
-            offset: [0, -10],
+            offset: [0, -8],
             opacity: 1,
             interactive: true,
             className: 'sd-pin-tip',
-          })
-          .on('click', () => setActiveId(center.id))
-          .addTo(layer);
+          });
+
+        marker.off('mouseover');
+        marker.off('mouseout');
+
+        marker.on('mouseover', () => {
+          clearTimeout(pinTimerRef.current);
+          marker.openTooltip();
+        });
+
+        marker.on('mouseout', () => {
+          schedulePinClose();
+        });
+
+        marker.on('click', () => {
+          clearTimeout(pinTimerRef.current);
+          marker.openTooltip();
+          setActiveId(center.id);
+        });
+
+        marker.on('tooltipopen', (e) => {
+          const tipEl = e.tooltip?.getElement();
+          if (tipEl && !tipEl._hoverBound) {
+            tipEl._hoverBound = true;
+            tipEl.addEventListener('mouseenter', () => clearTimeout(pinTimerRef.current));
+            tipEl.addEventListener('mouseleave', () => schedulePinClose());
+          }
+        });
+
+        marker.addTo(layer);
       });
       if (activeCenter.geo_coords?.lat) {
         map.setView(
@@ -380,10 +458,14 @@ const GISMap = () => {
     }
   }, [engine, filteredCenters, activeCenter, leafletReady]);
 
-  // Live snapshots: refresh the ground-CCTV wall every 4 s.
+  // Live snapshots: refresh the ground-CCTV wall every 10 s (was 4 s:
+  // 100 users x N cameras at 4 s saturates the single Node event loop).
   useEffect(() => {
     if (!onlineCameras) return undefined;
-    const interval = setInterval(() => setTick((t) => t + 1), 4000);
+    if (document.hidden) return undefined;
+    const interval = setInterval(() => {
+      if (!document.hidden) setTick((t) => t + 1);
+    }, 10000);
     return () => clearInterval(interval);
   }, [activeCenter?.id, onlineCameras]);
 
@@ -729,9 +811,9 @@ const GISMap = () => {
                           >
                             <Box sx={{ position: 'relative', bgcolor: '#0f172a' }}>
                               {cam.online ? (
-                                <Box
-                                  component="img"
-                                  src={`${monitoringAPI.snapshotUrl(cam.id)}&frame=${tick}`}
+                                <AuthSnapshot
+                                  cameraId={cam.id}
+                                  refreshKey={tick}
                                   alt={cam.name}
                                   sx={{ display: 'block', width: '100%', height: 108, objectFit: 'cover' }}
                                 />

@@ -9,9 +9,7 @@ import {
   Fingerprint as FingerprintIcon,
   Refresh as RefreshIcon,
 } from '@mui/icons-material';
-import { adminAPI } from '../services/api';
-
-const API_ORIGIN = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace(/\/api\/?$/, '');
+import { adminAPI, evidenceAPI } from '../services/api';
 
 const formatGeo = (coords) => {
   if (!coords) return '-';
@@ -70,7 +68,7 @@ const Evidence = () => {
   };
 
   const recheckAll = async () => {
-    const hashed = evidence.filter((e) => e.sha256_hash);
+    const hashed = evidence.filter((e) => hashOf(e));
     if (!hashed.length) return;
     setBusy('all');
     try {
@@ -79,7 +77,7 @@ const Evidence = () => {
       );
       const next = {};
       results.forEach((res, idx) => {
-        if (res) next[hashed[idx].id] = res.data.integrity;
+        if (res?.data?.integrity) next[hashed[idx].id] = res.data.integrity;
       });
       setVerdicts(next);
     } finally {
@@ -104,11 +102,15 @@ const Evidence = () => {
     }
   };
 
-  const statusOf = (item) => verdicts[item.id]?.status || item.integrity_status || (item.sha256_hash ? 'hashed' : 'unverified');
+  const hashOf = (item) => item?.sha256_hash || item?.file_hash;
+  const statusOf = (item) =>
+    verdicts[item.id]?.status ||
+    item.integrity_status ||
+    (item.verified && hashOf(item) ? 'verified' : hashOf(item) ? 'hashed' : 'unverified');
   const pending = evidence.filter((e) => !e.verified).length;
   const tampered = evidence.filter((e) => statusOf(e) === 'tampered').length;
   const intact = evidence.filter((e) => statusOf(e) === 'verified').length;
-  const unhashed = evidence.filter((e) => !e.sha256_hash).length;
+  const unhashed = evidence.filter((e) => !hashOf(e)).length;
 
   return (
     <Box>
@@ -160,9 +162,9 @@ const Evidence = () => {
                 <TableCell sx={{ fontFamily: 'monospace', fontSize: 12 }}>{formatGeo(e.geo_coords)}</TableCell>
                 <TableCell>{formatDate(e.timestamp || e.created_at)}</TableCell>
                 <TableCell>
-                  <Tooltip title={e.sha256_hash || 'No hash recorded (uploaded before the chain existed)'}>
-                    <span style={{ fontFamily: 'monospace', fontSize: 11.5, color: e.sha256_hash ? '#334155' : '#94a3b8' }}>
-                      {shortHash(e.sha256_hash)}
+                  <Tooltip title={hashOf(e) || 'No hash recorded (uploaded before the chain existed)'}>
+                    <span style={{ fontFamily: 'monospace', fontSize: 11.5, color: hashOf(e) ? '#334155' : '#94a3b8' }}>
+                      {shortHash(hashOf(e))}
                     </span>
                   </Tooltip>
                 </TableCell>
@@ -188,7 +190,7 @@ const Evidence = () => {
                       <IconButton
                         color="primary"
                         disabled={!e.file_path}
-                        onClick={() => window.open(`${API_ORIGIN}${e.file_path}`, '_blank')}
+                        onClick={() => evidenceAPI.openFile(e.file_path)}
                       >
                         <VisibilityIcon />
                       </IconButton>
@@ -196,7 +198,7 @@ const Evidence = () => {
                   </Tooltip>
                   <Tooltip title="Re-hash the stored file on the server">
                     <span>
-                      <IconButton color="info" disabled={!e.sha256_hash || busy === e.id} onClick={() => recheck(e.id)}>
+                      <IconButton color="info" disabled={!hashOf(e) || busy === e.id} onClick={() => recheck(e.id)}>
                         <FingerprintIcon />
                       </IconButton>
                     </span>

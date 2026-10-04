@@ -12,7 +12,7 @@ const HISTORY = [
 const GROUPS = ['Live', 'Pending', 'Completed'];
 
 const Inspections = () => {
-  const { session, checklistDone } = useInspection();
+  const { session, checklistDone, checklistTotal } = useInspection();
   const navigate = useNavigate();
   const [group, setGroup] = React.useState('Live');
 
@@ -39,9 +39,9 @@ const Inspections = () => {
             <div className="divider" />
             <div className="row tiny muted" style={{ justifyContent: 'space-between', marginBottom: 5 }}>
               <span>Progress</span>
-              <b style={{ color: 'var(--ink)' }}>{checklistDone}/24 · {s.evidence.length} evidence</b>
+              <b style={{ color: 'var(--ink)' }}>{checklistDone}/{checklistTotal} · {s.evidence.length} evidence</b>
             </div>
-            <Bar pct={(checklistDone / 24) * 100} tone="info" />
+            <Bar pct={checklistTotal ? (checklistDone / checklistTotal) * 100 : 0} tone="info" />
             <div className="row" style={{ gap: 5, marginTop: 10, flexWrap: 'wrap' }}>
               <Chip tone={s.gps?.verified ? 'ok' : 'mute'} dot>GPS {s.gps?.verified ? 'VERIFIED' : 'PENDING'}</Chip>
               <Chip tone={s.vc.status === 'ended' ? 'ok' : 'mute'} dot>VC {s.vc.status === 'ended' ? 'DONE' : 'PENDING'}</Chip>
@@ -85,7 +85,7 @@ const Inspections = () => {
                 key={h.id}
                 type="button"
                 className="g-list-row"
-                onClick={() => navigate('/inspection/summary')}
+                onClick={() => navigate(`/inspections/${h.id}`)}
                 style={{ background: 'none', border: 'none', width: '100%', textAlign: 'left', cursor: 'pointer', borderBottom: '1px solid var(--line-soft)' }}
               >
                 <div className="g-avatar" style={{ background: 'var(--green-bg)', color: 'var(--green-ink)' }}>✓</div>

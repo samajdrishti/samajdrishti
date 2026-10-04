@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { evidenceAPI, inspectionAPI, vcAPI } from '../services/api';
-import { formatCoords, formatDistance, getPosition } from '../services/geo';
+import { formatDistance, getPosition } from '../services/geo';
 import { queueEvidence, queueInspectionUpdate } from '../services/offlineQueue';
 
 const VERDICT_COPY = {
@@ -406,6 +406,12 @@ const InspectionDetail = () => {
       {error && <div className="alert alert-error">{error}</div>}
       {message && <div className="alert alert-info">{message}</div>}
 
+      {flags.length > 0 && (
+        <div className="banner banner-suspicious" role="status">
+          Auto-flagged: {flags.join(', ')}
+        </div>
+      )}
+
       {verification && (
         <div className={`banner banner-${verification.verdict}`}>
           <div>{VERDICT_COPY[verification.verdict]}</div>
@@ -589,7 +595,7 @@ const InspectionDetail = () => {
               {evidence.map((ev) => (
                 <div key={ev.id} style={{ position: 'relative' }}>
                   <img
-                    src={ev.file_path}
+                    src={evidenceAPI.fileUrl(ev.file_path)}
                     alt="evidence"
                     style={{ width: '100%', height: 70, objectFit: 'cover', borderRadius: 4 }}
                     onError={(e) => {

@@ -1,19 +1,37 @@
 {
-  "name": "DoSJE SmartInspect - Field Inspection",
-  "short_name": "SmartInspect",
-  "description": "Real-time inspection, verified evidence, transparent governance. Geo-tagged inspections, live CCTV monitoring and random video verification for DoSJE schemes.",
+  "name": "Samaj Drishti Field Inspection",
+  "short_name": "DoSJE Inspect",
+  "description": "AI-Powered Real-Time Monitoring for Department of Social Justice & Empowerment",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "orientation": "portrait",
   "background_color": "#f2f5f9",
   "theme_color": "#123a63",
+  "orientation": "portrait",
   "icons": [
     {
-      "src": "/icon.svg",
-      "sizes": "any",
+      "src": "/icons/icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "/icons/icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "/icons/maskable-192.svg",
+      "sizes": "192x192",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/maskable-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
     }
-  ]
+  ],
+  "categories": ["business", "productivity"],
+  "lang": "en-IN"
 }

@@ -26,7 +26,8 @@ public record AppProperties(
 
     public record AiEngine(@DefaultValue("http://localhost:5001") String baseUrl,
                            @DefaultValue("3000") int healthTimeoutMs,
-                           @DefaultValue("15000") int defaultTimeoutMs) {
+                           @DefaultValue("15000") int defaultTimeoutMs,
+                           @DefaultValue("") String apiKey) {
         public Duration healthTimeout() {
             return Duration.ofMillis(healthTimeoutMs);
         }
