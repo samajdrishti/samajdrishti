@@ -87,13 +87,16 @@ services:
   - type: web
     name: samajdrishti-admin
     env: static
-    buildCommand: cd admin && npm ci && npm run build
-    staticPublishPath: ./admin/dist
+    rootDir: admin
+    buildCommand: npm ci --include=dev && npm run build
+    staticPublishPath: ./dist
     routes:
       - type: rewrite
         source: /*
         destination: /index.html
     envVars:
+      - key: NODE_VERSION
+        value: "20"
       - key: VITE_API_URL
         value: https://samajdrishti-api.onrender.com/api
 
@@ -101,12 +104,15 @@ services:
   - type: web
     name: samajdrishti-mobile
     env: static
-    buildCommand: cd mobile-web && npm ci && npm run build
-    staticPublishPath: ./mobile-web/dist
+    rootDir: mobile-web
+    buildCommand: npm ci --include=dev && npm run build
+    staticPublishPath: ./dist
     routes:
       - type: rewrite
         source: /*
         destination: /index.html
     envVars:
+      - key: NODE_VERSION
+        value: "20"
       - key: VITE_API_URL
         value: https://samajdrishti-api.onrender.com/api
