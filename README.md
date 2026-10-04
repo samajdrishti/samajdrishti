@@ -8,6 +8,46 @@ Smart India Hackathon 2026 | Problem Statement ID: 26095 | Theme: Smart Automati
 
 ---
 
+## 🌐 Live Production Deployment
+
+> **Your Entire Stack is LIVE and Fully Operational!**  
+> All 5 services have been deployed on Render with PostgreSQL, Spring Boot, FastAPI, and both React frontends connected and serving live traffic.
+
+### 🌐 Live Production URLs
+
+| Component | Role | Live Link |
+| :--- | :--- | :--- |
+| **Admin Back-Office Portal** | Web Dashboard (MUI + React) | 👉 [https://samajdrishti-admin.onrender.com](https://samajdrishti-admin.onrender.com/) |
+| **Mobile Field App (PWA)** | Inspection App (GPS + Camera) | 👉 [https://samajdrishti-mobile.onrender.com](https://samajdrishti-mobile.onrender.com/) |
+| **Backend API** | Java Spring Boot REST API | 👉 [https://samajdrishti-api.onrender.com/api/health](https://samajdrishti-api.onrender.com/api/health) |
+| **Database** | PostgreSQL 18 Database | Active & connected on Render private network |
+| **AI Engine** | Python FastAPI ML Engine | Active & connected via internal network |
+
+### 🔑 Demo Logins (Ready to Test Immediately)
+
+Open [https://samajdrishti-admin.onrender.com](https://samajdrishti-admin.onrender.com/) in your browser and log in with any of these pre-seeded accounts:
+
+1. **System Administrator / Ministry PMU**
+   - **Email:** `admin@samajdrishti.gov.in`
+   - **Password:** `Admin@123`
+   - **Access:** Full dashboard analytics, project oversight, risk distribution, GIS map, and AI insights.
+
+2. **Field Inspection Officer**
+   - **Email:** `officer@samajdrishti.gov.in`
+   - **Password:** `Officer@123`
+   - **Access:** Assigned random site inspections, geotagged evidence capture, and attendance verification.
+
+3. **State Auditor**
+   - **Email:** `auditor@samajdrishti.gov.in`
+   - **Password:** `Auditor@123`
+   - **Access:** Independent audit logs, tamper check reviews, and ATR adjudication.
+
+### 🚀 Live Verification Summary
+- **Database Status:** `dataMode: postgres` verified live on Render.
+- **REST Endpoints:** Authentication, project list, inspection data, and GIS markers successfully verified over live HTTPS.
+
+---
+
 ## 📁 Project Structure
 
 ```
