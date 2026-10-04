@@ -20,6 +20,12 @@ databases:
   - name: samajdrishti-db
     plan: free
 
+envVarGroups:
+  - name: samajdrishti-shared-secrets
+    envVars:
+      - key: AI_ENGINE_API_KEY
+        generateValue: true
+
 services:
   # Shared Spring Boot backend — serves BOTH frontends and the AI engine link.
   - type: web
@@ -30,9 +36,10 @@ services:
     plan: free
     healthCheckPath: /api/health
     envVars:
+      - fromGroup: samajdrishti-shared-secrets
+      - key: PORT
+        value: 5000
       - key: JWT_SECRET
-        generateValue: true
-      - key: AI_ENGINE_API_KEY
         generateValue: true
       - key: AI_ENGINE_URL
         value: http://ai-engine:5001
@@ -61,7 +68,7 @@ services:
           name: samajdrishti-db
           property: password
       - key: SEED_DEMO_DATA
-        value: true
+        value: "true"
 
   # Python AI engine — internal traffic only (API reaches it at ai-engine:5001).
   - type: web
@@ -72,8 +79,9 @@ services:
     plan: free
     healthCheckPath: /api/health
     envVars:
-      - key: AI_ENGINE_API_KEY
-        generateValue: true
+      - fromGroup: samajdrishti-shared-secrets
+      - key: PORT
+        value: 5001
 
   # FRONTEND 1/2 — Website: department back-office dashboard (desktop, MUI).
   - type: web
