@@ -1,8 +1,76 @@
+import base64
+import io
+import json
 import math
 import os
+import urllib.request
+import urllib.error
 from datetime import datetime
 from PIL import Image, ExifTags
 import numpy as np
+
+def _nvidia_vision_check(img_path: str) -> dict | None:
+    api_key = (os.environ.get("NVIDIA_API_KEY") or "").strip()
+    if not api_key or not os.path.exists(img_path):
+        return None
+    try:
+        with Image.open(img_path) as img:
+            img_thumb = img.convert("RGB")
+            img_thumb.thumbnail((512, 512))
+            buf = io.BytesIO()
+            img_thumb.save(buf, format="JPEG", quality=80)
+            b64_img = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+        prompt = (
+            "You are a forensic computer vision auditor for government field inspections. "
+            "Analyze this evidence photo carefully and answer in JSON with two keys:\n"
+            "1. 'is_screen_or_spoof': boolean (true if this is a photo of another screen/monitor/phone/paper or synthetic image, false if a real-world physical photo)\n"
+            "2. 'reason': brief one-sentence reason\n"
+            "Respond ONLY with valid JSON."
+        )
+
+        payload = json.dumps({
+            "model": os.environ.get("NVIDIA_VISION_MODEL", "meta/llama-3.2-11b-vision-instruct"),
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}}
+                    ]
+                }
+            ],
+            "max_tokens": 150,
+            "temperature": 0.1,
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            "https://integrate.api.nvidia.com/v1/chat/completions",
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "User-Agent": "samaj-drishti-ai-engine/1.0",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            content = data["choices"][0]["message"]["content"].strip()
+            if content.startswith("```"):
+                content = content.split("```")[1]
+                if content.startswith("json"):
+                    content = content[4:]
+            parsed = json.loads(content.strip())
+            return {
+                "active": True,
+                "provider": "nvidia-nim:llama-3.2-11b-vision",
+                "is_screen_or_spoof": bool(parsed.get("is_screen_or_spoof")),
+                "reason": str(parsed.get("reason", "")),
+            }
+    except Exception as exc:
+        print(f"[image_verifier] NVIDIA vision check note: {exc}")
+        return None
 
 def _convert_to_degrees(value):
     """Helper function to convert GPS coordinates stored in EXIF to degrees."""
@@ -189,10 +257,20 @@ class ImageVerifier:
         else:
             tamper_flags.append("exif_present_no_gps")
 
+        # AI Vision Model Anti-Spoofing Check (NVIDIA NIM)
+        ai_vision = _nvidia_vision_check(img_path)
+        if ai_vision:
+            if ai_vision.get("is_screen_or_spoof"):
+                tamper_flags.append(f"ai_vision_spoof_detected: {ai_vision.get('reason')}")
+                authenticity_score -= 30
+            else:
+                tamper_flags.append("ai_vision_genuine_verified")
+                authenticity_score += 5
+
         authenticity_score = int(min(100, max(5, authenticity_score)))
 
         verdict = "authentic"
-        if authenticity_score < 45 or screen_check["is_screen_photo"]:
+        if authenticity_score < 45 or screen_check["is_screen_photo"] or (ai_vision and ai_vision.get("is_screen_or_spoof")):
             verdict = "suspect_fake"
         elif authenticity_score < 70:
             verdict = "review_needed"
@@ -202,6 +280,7 @@ class ImageVerifier:
             "verdict": verdict,
             "tamper_flags": tamper_flags,
             "screen_recapture_risk": screen_check["screen_risk"],
+            "ai_vision": ai_vision,
             "exif": {
                 "has_exif": exif["has_exif"],
                 "camera": f"{exif['camera_make'] or ''} {exif['camera_model'] or ''}".strip() or None,
