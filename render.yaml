@@ -1,0 +1,104 @@
+# Render Blueprint — one-click live hosting for the whole Samaj Drishti stack.
+#
+# Deploy: Render Dashboard → New → Blueprint → select this repo.
+# Render creates: Postgres DB, Spring Boot API, AI engine (private traffic only),
+# admin dashboard (website) and mobile-web field PWA — five pieces, zero CLI.
+#
+# After deploy, open the two frontend URLs Render assigns:
+#   Website (back office) .... https://samajdrishti-admin.onrender.com
+#   Mobile PWA (officials) .... https://samajdrishti-mobile.onrender.com
+# Demo logins work out of the box (SEED_DEMO_DATA=true below).
+#
+# Notes:
+# - Free-tier services sleep when idle: first load after inactivity takes ~1 min.
+# - CORS_ORIGINS=* is demo convenience so the browser never hits the CORS wall
+#   again. Restrict it to the two frontend URLs before any production use.
+# - The mobile PWA needs HTTPS to install + use GPS/camera/push — Render
+#   provides it automatically.
+
+databases:
+  - name: samajdrishti-db
+    plan: free
+
+services:
+  # Shared Spring Boot backend — serves BOTH frontends and the AI engine link.
+  - type: web
+    name: samajdrishti-api
+    runtime: docker
+    dockerfilePath: ./backend-java/Dockerfile
+    dockerContext: ./backend-java
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true
+      - key: AI_ENGINE_API_KEY
+        generateValue: true
+      - key: AI_ENGINE_URL
+        value: http://ai-engine:5001
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: DB_MODE
+        value: postgres
+      - key: DB_HOST
+        fromDatabase:
+          name: samajdrishti-db
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: samajdrishti-db
+          property: port
+      - key: DB_NAME
+        fromDatabase:
+          name: samajdrishti-db
+          property: database
+      - key: DB_USER
+        fromDatabase:
+          name: samajdrishti-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: samajdrishti-db
+          property: password
+      - key: SEED_DEMO_DATA
+        value: true
+
+  # Python AI engine — internal traffic only (API reaches it at ai-engine:5001).
+  - type: web
+    name: ai-engine
+    runtime: docker
+    dockerfilePath: ./ai-engine/Dockerfile
+    dockerContext: ./ai-engine
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: AI_ENGINE_API_KEY
+        generateValue: true
+
+  # FRONTEND 1/2 — Website: department back-office dashboard (desktop, MUI).
+  - type: web
+    name: samajdrishti-admin
+    env: static
+    buildCommand: cd admin && npm ci && npm run build
+    staticPublishPath: ./admin/dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
+        value: https://samajdrishti-api.onrender.com/api
+
+  # FRONTEND 2/2 — Mobile: field inspection PWA for officials (installable).
+  - type: web
+    name: samajdrishti-mobile
+    env: static
+    buildCommand: cd mobile-web && npm ci && npm run build
+    staticPublishPath: ./mobile-web/dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
+        value: https://samajdrishti-api.onrender.com/api
