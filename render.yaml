@@ -37,8 +37,6 @@ services:
     healthCheckPath: /api/health
     envVars:
       - fromGroup: samajdrishti-shared-secrets
-      - key: PORT
-        value: 5000
       - key: JWT_SECRET
         generateValue: true
       - key: AI_ENGINE_URL
@@ -46,7 +44,7 @@ services:
       - key: CORS_ORIGINS
         value: "*"
       - key: DB_MODE
-        value: postgres
+        value: auto
       - key: DB_HOST
         fromDatabase:
           name: samajdrishti-db

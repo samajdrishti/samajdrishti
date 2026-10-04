@@ -133,12 +133,26 @@ public class DataSourceEnvironmentPostProcessor implements EnvironmentPostProces
         Properties properties = new Properties();
         properties.setProperty("user", user);
         properties.setProperty("password", password);
-        properties.setProperty("connectTimeout", String.valueOf(CONNECT_TIMEOUT_SECONDS));
-        properties.setProperty("socketTimeout", "5");
-        properties.setProperty("loginTimeout", String.valueOf(CONNECT_TIMEOUT_SECONDS));
-        DriverManager.setLoginTimeout(CONNECT_TIMEOUT_SECONDS);
-        try (Connection ignored = DriverManager.getConnection(url, properties)) {
-            // Opening a connection is the reachability probe; nothing else to do.
+        properties.setProperty("connectTimeout", "5");
+        properties.setProperty("socketTimeout", "10");
+        properties.setProperty("loginTimeout", "5");
+        DriverManager.setLoginTimeout(5);
+        SQLException lastEx = null;
+        for (int i = 0; i < 5; i++) {
+            try (Connection ignored = DriverManager.getConnection(url, properties)) {
+                return;
+            } catch (SQLException e) {
+                lastEx = e;
+                try {
+                    Thread.sleep(2000);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw e;
+                }
+            }
+        }
+        if (lastEx != null) {
+            throw lastEx;
         }
     }
 
