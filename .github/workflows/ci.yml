@@ -126,18 +126,8 @@ jobs:
     needs: [test-ai-engine]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Build wheel
-        run: |
-          cd ai-engine
-          python -m pip install --upgrade pip build
-          python -m build
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ai-engine-dist
-          path: ai-engine/dist/
+      - name: Build Docker image
+        run: docker build ./ai-engine -t ai-engine:latest
 
   summary:
     runs-on: ubuntu-latest
