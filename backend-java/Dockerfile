@@ -6,6 +6,8 @@ FROM maven:3.9-eclipse-temurin-17 AS builder
 
 WORKDIR /app
 
+ENV MAVEN_OPTS="-Xmx384m -XX:+UseSerialGC"
+
 # Cache dependencies
 COPY pom.xml .
 RUN mvn dependency:go-offline -B
@@ -36,4 +38,4 @@ EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD wget -qO /dev/null http://localhost:5000/api/health || exit 1
 
-ENTRYPOINT ["java", "-jar", "app.jar"]
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "-jar", "app.jar"]
